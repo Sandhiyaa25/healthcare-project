@@ -1,0 +1,24 @@
+# Options -Indexes
+# RewriteEngine On
+
+# If request is already inside /public, do nothing
+
+# RewriteCond %{REQUEST_URI} ^/healthcare-project/public/ [NC]
+# RewriteRule ^ - [L]
+
+# Redirect everything else into public/
+
+# RewriteRule ^(.*)$ public/$1 [L]
+
+Options -Indexes
+RewriteEngine On
+
+# Allow hash.php to be accessed directly
+RewriteRule ^hash\.php$ - [L]
+
+# If request is already inside /public, do nothing
+RewriteCond %{REQUEST_URI} ^/healthcare-project/public/ [NC]
+RewriteRule ^ - [L]
+
+# Redirect everything else into public/
+RewriteRule ^(.*)$ public/$1 [L]
