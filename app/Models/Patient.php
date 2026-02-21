@@ -143,4 +143,14 @@ class Patient
         $stmt->execute([$tenantId]);
         return (int) $stmt->fetchColumn();
     }
+
+    public function countByDateRange(int $tenantId, string $startDate, string $endDate): int
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*) FROM patients
+            WHERE tenant_id = ? AND DATE(created_at) BETWEEN ? AND ? AND deleted_at IS NULL
+        ");
+        $stmt->execute([$tenantId, $startDate, $endDate]);
+        return (int) $stmt->fetchColumn();
+    }
 }

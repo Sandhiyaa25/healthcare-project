@@ -144,7 +144,8 @@ $router->post('/api/prescriptions',         [\App\Controllers\PrescriptionContro
 $router->patch('/api/prescriptions/{id}/verify', [\App\Controllers\PrescriptionController::class, 'verify'], $protected);
 
 // ── Dashboard ──
-$router->get('/api/dashboard', [\App\Controllers\DashboardController::class, 'index'], $protectedGet);
+$router->get('/api/dashboard',            [\App\Controllers\DashboardController::class, 'index'],     $protectedGet);
+$router->get('/api/dashboard/analytics',  [\App\Controllers\DashboardController::class, 'analytics'], $protectedGet);
 
 // ── Messages (Communication) ──
 $router->get('/api/messages/{appointment_id}',  [\App\Controllers\MessageController::class, 'getByAppointment'], $protectedGet);
@@ -167,6 +168,7 @@ $router->delete('/api/staff/{id}',[\App\Controllers\StaffController::class, 'des
 // ── Calendar ──
 $router->get('/api/calendar',             [\App\Controllers\CalendarController::class, 'index'],  $protectedGet);
 $router->get('/api/calendar/{date}',      [\App\Controllers\CalendarController::class, 'byDate'], $protectedGet);
+$router->get('/api/calendar/event/{id}',  [\App\Controllers\CalendarController::class, 'eventDetail'], $protectedGet);
 
 // ── Medical Records ──
 $router->get('/api/records/patient/{patient_id}', [\App\Controllers\RecordController::class, 'getByPatient'], $protectedGet);
@@ -200,5 +202,6 @@ $router->patch('/api/platform/tenants/{id}/reactivate',      [\App\Controllers\T
 $router->get('/api/tenants/roles', [\App\Controllers\TenantController::class, 'getRoles'], $protectedGet);
 
 // ─── Dispatch ────────────────────────────────────────────────────────────────
-//git created
+
+
 $router->dispatch($request);

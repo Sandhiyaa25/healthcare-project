@@ -14,6 +14,15 @@ class Staff
         $this->db = Database::getInstance();
     }
 
+    public function findByUserId(int $userId, int $tenantId): ?array
+    {
+        $stmt = $this->db->prepare("
+            SELECT * FROM staff WHERE user_id = ? AND tenant_id = ? AND deleted_at IS NULL
+        ");
+        $stmt->execute([$userId, $tenantId]);
+        return $stmt->fetch() ?: null;
+    }
+
     public function findById(int $id, int $tenantId): ?array
     {
         $stmt = $this->db->prepare("

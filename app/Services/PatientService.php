@@ -9,9 +9,16 @@ use App\Exceptions\ValidationException;
 
 class PatientService
 {
-    private Patient  $patientModel;
-    private AuditLog $auditLog;
+    private Patient           $patientModel;
+    private AuditLog          $auditLog;
     private EncryptionService $encryption;
+
+    // AES-encrypted fields — everything except IDs, statuses, non-PHI
+private const ENCRYPTED_FIELDS = [
+    'first_name', 'last_name', 'email', 'phone',
+    'address', 'date_of_birth', 'allergies', 'medical_notes',
+    'emergency_contact_name', 'emergency_contact_phone',
+];
 
     public function __construct()
     {
@@ -31,7 +38,7 @@ class PatientService
             return ['patients' => [], 'message' => $msg];
         }
 
-        return ['patients' => array_map([$this, 'safePatient'], $patients)];
+        return ['patients' => array_map([$this, 'decryptAndSafe'], $patients)];
     }
 
     public function getById(int $id, int $tenantId): array
@@ -40,7 +47,7 @@ class PatientService
         if (!$patient) {
             throw new ValidationException('Patient not found');
         }
-        return $this->safePatient($patient);
+        return $this->decryptAndSafe($patient);
     }
 
     public function create(array $data, int $tenantId, int $userId, string $ip, string $userAgent): array
@@ -51,12 +58,20 @@ class PatientService
             throw new ValidationException('Validation failed', $errors);
         }
 
+        // Blind indexes from plaintext BEFORE encryption
         $fnBlind    = $this->encryption->blindIndex($data['first_name']);
         $lnBlind    = $this->encryption->blindIndex($data['last_name']);
         $emailBlind = !empty($data['email']) ? $this->encryption->blindIndex($data['email']) : null;
 
-        $patientId = $this->patientModel->create(array_merge($data, [
+        // Encrypt sensitive fields
+        $encrypted = $this->encryptFields($data);
+
+        $patientId = $this->patientModel->create(array_merge($encrypted, [
             'tenant_id'              => $tenantId,
+            'user_id'                => $data['user_id'] ?? null,
+            'blood_group'            => $data['blood_group'] ?? null,
+            'gender'                 => $data['gender'] ?? null,
+            'status'                 => $data['status'] ?? 'active',
             'first_name_blind_index' => $fnBlind,
             'last_name_blind_index'  => $lnBlind,
             'email_blind_index'      => $emailBlind,
@@ -73,7 +88,7 @@ class PatientService
             'user_agent'   => $userAgent,
         ]);
 
-        return $this->safePatient($this->patientModel->findById($patientId, $tenantId));
+        return $this->decryptAndSafe($this->patientModel->findById($patientId, $tenantId));
     }
 
     public function update(int $id, array $data, int $tenantId, int $userId, string $ip, string $userAgent): array
@@ -89,12 +104,23 @@ class PatientService
             throw new ValidationException('Validation failed', $errors);
         }
 
-        $fnBlind    = $this->encryption->blindIndex($data['first_name'] ?? $patient['first_name']);
-        $lnBlind    = $this->encryption->blindIndex($data['last_name']  ?? $patient['last_name']);
-        $emailBlind = !empty($data['email']) ? $this->encryption->blindIndex($data['email']) : null;
+        // Decrypt existing for merge
+        $decrypted  = $this->decryptFields($patient);
+        $plainFirst = $data['first_name'] ?? $decrypted['first_name'];
+        $plainLast  = $data['last_name']  ?? $decrypted['last_name'];
+        $plainEmail = $data['email']      ?? $decrypted['email'];
 
-        // Merge with existing data so partial updates work
-        $updateData = array_merge($patient, $data, [
+        $fnBlind    = $this->encryption->blindIndex($plainFirst ?? '');
+        $lnBlind    = $this->encryption->blindIndex($plainLast ?? '');
+        $emailBlind = $plainEmail ? $this->encryption->blindIndex($plainEmail) : null;
+
+        $merged    = array_merge($decrypted, $data);
+        $encrypted = $this->encryptFields($merged);
+
+        $updateData = array_merge($patient, $encrypted, [
+            'blood_group'            => $merged['blood_group'] ?? $patient['blood_group'],
+            'gender'                 => $merged['gender']      ?? $patient['gender'],
+            'status'                 => $merged['status']      ?? $patient['status'],
             'first_name_blind_index' => $fnBlind,
             'last_name_blind_index'  => $lnBlind,
             'email_blind_index'      => $emailBlind,
@@ -113,25 +139,18 @@ class PatientService
             'user_agent'   => $userAgent,
         ]);
 
-        return $this->safePatient($this->patientModel->findById($id, $tenantId));
+        return $this->decryptAndSafe($this->patientModel->findById($id, $tenantId));
     }
 
-    /**
-     * Patient views their own profile via user_id link.
-     */
     public function getByUserId(int $userId, int $tenantId): array
     {
         $patient = $this->patientModel->findByUserId($userId, $tenantId);
         if (!$patient) {
             throw new ValidationException('No patient profile linked to your account. Please contact reception.');
         }
-        return $this->safePatient($patient);
+        return $this->decryptAndSafe($patient);
     }
 
-    /**
-     * Patient updates their own profile — only safe fields allowed.
-     * They cannot change: tenant_id, status, medical_notes, allergies (set by doctor).
-     */
     public function updateOwnProfile(int $userId, array $data, int $tenantId, string $ip, string $userAgent): array
     {
         $patient = $this->patientModel->findByUserId($userId, $tenantId);
@@ -139,8 +158,7 @@ class PatientService
             throw new ValidationException('No patient profile linked to your account');
         }
 
-        // Only allow patients to update personal/contact fields
-        $allowed = ['phone', 'address', 'emergency_contact_name', 'emergency_contact_phone'];
+        $allowed  = ['phone', 'address', 'emergency_contact_name', 'emergency_contact_phone'];
         $safeData = array_intersect_key($data, array_flip($allowed));
 
         if (empty($safeData)) {
@@ -149,11 +167,15 @@ class PatientService
             );
         }
 
-        // Merge safe data with existing record
-        $updateData = array_merge($patient, $safeData, [
-            'first_name_blind_index' => $this->encryption->blindIndex($patient['first_name']),
-            'last_name_blind_index'  => $this->encryption->blindIndex($patient['last_name']),
-            'email_blind_index'      => !empty($patient['email']) ? $this->encryption->blindIndex($patient['email']) : null,
+        // Decrypt existing, merge, re-encrypt
+        $decrypted  = $this->decryptFields($patient);
+        $merged     = array_merge($decrypted, $safeData);
+        $encrypted  = $this->encryptFields($merged);
+
+        $updateData = array_merge($patient, $encrypted, [
+            'first_name_blind_index' => $this->encryption->blindIndex($decrypted['first_name'] ?? ''),
+            'last_name_blind_index'  => $this->encryption->blindIndex($decrypted['last_name'] ?? ''),
+            'email_blind_index'      => !empty($decrypted['email']) ? $this->encryption->blindIndex($decrypted['email']) : null,
         ]);
 
         $this->patientModel->update($patient['id'], $tenantId, $updateData);
@@ -170,19 +192,7 @@ class PatientService
             'new_values'   => $safeData,
         ]);
 
-        return $this->safePatient($this->patientModel->findById($patient['id'], $tenantId));
-    }
-
-    // ─── Helper ─────────────────────────────────────────────────────
-
-    private function safePatient(array $patient): array
-    {
-        unset(
-            $patient['first_name_blind_index'],
-            $patient['last_name_blind_index'],
-            $patient['email_blind_index']
-        );
-        return $patient;
+        return $this->decryptAndSafe($this->patientModel->findById($patient['id'], $tenantId));
     }
 
     public function delete(int $id, int $tenantId, int $userId, string $ip, string $userAgent): void
@@ -204,5 +214,41 @@ class PatientService
             'ip_address'   => $ip,
             'user_agent'   => $userAgent,
         ]);
+    }
+
+    // ─── AES helpers ─────────────────────────────────────────────────
+
+    private function encryptFields(array $data): array
+    {
+        foreach (self::ENCRYPTED_FIELDS as $field) {
+            if (array_key_exists($field, $data)) {
+                $val = $data[$field];
+                $data[$field] = ($val !== null && $val !== '')
+                    ? $this->encryption->encryptField((string) $val)
+                    : null;
+            }
+        }
+        return $data;
+    }
+
+    private function decryptFields(array $data): array
+    {
+        foreach (self::ENCRYPTED_FIELDS as $field) {
+            if (array_key_exists($field, $data)) {
+                $data[$field] = $this->encryption->decryptField($data[$field]);
+            }
+        }
+        return $data;
+    }
+
+    private function decryptAndSafe(array $patient): array
+    {
+        $patient = $this->decryptFields($patient);
+        unset(
+            $patient['first_name_blind_index'],
+            $patient['last_name_blind_index'],
+            $patient['email_blind_index']
+        );
+        return $patient;
     }
 }

@@ -3,39 +3,66 @@
 namespace App\Services;
 
 use App\Models\Staff;
+use App\Models\User;
 use App\Models\AuditLog;
 use App\Exceptions\ValidationException;
+use App\Exceptions\AuthException;
 
 class StaffService
 {
     private Staff    $staffModel;
+    private User     $userModel;
     private AuditLog $auditLog;
 
     public function __construct()
     {
         $this->staffModel = new Staff();
+        $this->userModel  = new User();
         $this->auditLog   = new AuditLog();
     }
 
+    // ─── Admin only: create/update/delete ───────────────────────────
+
     public function getAll(int $tenantId, array $filters, int $page, int $perPage): array
     {
-        return $this->staffModel->getAll($tenantId, $filters, $page, $perPage);
+        $staff = $this->staffModel->getAll($tenantId, $filters, $page, $perPage);
+
+        if (empty($staff)) {
+            return ['staff' => [], 'message' => 'No staff found in your tenant'];
+        }
+
+        return ['staff' => $staff];
     }
 
     public function getById(int $id, int $tenantId): array
     {
         $staff = $this->staffModel->findById($id, $tenantId);
         if (!$staff) {
-            throw new ValidationException('Staff not found');
+            throw new ValidationException('Staff not found in your tenant');
         }
         return $staff;
     }
 
     public function create(array $data, int $tenantId, int $adminId, string $ip, string $userAgent): array
     {
-        if (empty($data['user_id']) || empty($data['role_id'])) {
-            throw new ValidationException('user_id and role_id are required');
+        if (empty($data['user_id'])) {
+            throw new ValidationException('user_id is required');
         }
+
+        // ── FIX: Verify user belongs to THIS tenant ──────────────────
+        $user = $this->userModel->findById((int) $data['user_id'], $tenantId);
+        if (!$user) {
+            throw new ValidationException('User not found in your tenant. You can only add staff from your own tenant.');
+        }
+
+        // Check if user is already a staff member in this tenant
+        $existing = $this->staffModel->findByUserId((int) $data['user_id'], $tenantId);
+        if ($existing) {
+            throw new ValidationException('This user is already registered as staff in your tenant.');
+        }
+
+        // role_id comes from the user's own role if not provided
+        $data['role_id'] = $data['role_id'] ?? $user['role_id'];
 
         $staffId = $this->staffModel->create(array_merge($data, ['tenant_id' => $tenantId]));
 
@@ -57,10 +84,19 @@ class StaffService
     {
         $staff = $this->staffModel->findById($id, $tenantId);
         if (!$staff) {
-            throw new ValidationException('Staff not found');
+            throw new ValidationException('Staff not found in your tenant');
         }
 
-        $this->staffModel->update($id, $tenantId, $data);
+        // ── FIX: Merge existing data so role_id always present ───────
+        $updateData = array_merge([
+            'role_id'        => $staff['role_id'],
+            'department'     => $staff['department'],
+            'specialization' => $staff['specialization'],
+            'license_number' => $staff['license_number'],
+            'status'         => $staff['status'],
+        ], $data);
+
+        $this->staffModel->update($id, $tenantId, $updateData);
 
         $this->auditLog->log([
             'tenant_id'    => $tenantId,
@@ -80,7 +116,7 @@ class StaffService
     {
         $staff = $this->staffModel->findById($id, $tenantId);
         if (!$staff) {
-            throw new ValidationException('Staff not found');
+            throw new ValidationException('Staff not found in your tenant');
         }
 
         $this->staffModel->softDelete($id, $tenantId);

@@ -17,10 +17,12 @@ class MessageController
 
     public function getByAppointment(Request $request): void
     {
-        $tenantId     = (int) $request->getAttribute('auth_tenant_id');
+        $tenantId      = (int) $request->getAttribute('auth_tenant_id');
+        $userId        = (int) $request->getAttribute('auth_user_id');
+        $role          = $request->getAttribute('auth_role');
         $appointmentId = (int) $request->param('appointment_id');
 
-        $messages = $this->messageService->getByAppointment($appointmentId, $tenantId);
+        $messages = $this->messageService->getByAppointment($appointmentId, $tenantId, $role, $userId);
         Response::success($messages, 'Messages retrieved');
     }
 
@@ -28,8 +30,9 @@ class MessageController
     {
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
         $senderId = (int) $request->getAttribute('auth_user_id');
+        $role     = $request->getAttribute('auth_role');
 
-        $messages = $this->messageService->create($request->all(), $tenantId, $senderId);
+        $messages = $this->messageService->create($request->all(), $tenantId, $senderId, $role);
         Response::created($messages, 'Message sent');
     }
 }

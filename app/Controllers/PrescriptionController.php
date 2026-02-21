@@ -29,12 +29,14 @@ class PrescriptionController
             'doctor_id'  => $request->query('doctor_id'),
         ];
 
+        // Doctor always sees only their own prescriptions
         if ($role === 'doctor') {
             $filters['doctor_id'] = $userId;
         }
 
-        $prescriptions = $this->prescriptionService->getAll($tenantId, $filters, $page, $perPage);
-        Response::success($prescriptions, 'Prescriptions retrieved');
+        $result = $this->prescriptionService->getAll($tenantId, $filters, $page, $perPage);
+        $msg    = $result['message'] ?? 'Prescriptions retrieved';
+        Response::success($result['prescriptions'] ?? $result, $msg);
     }
 
     public function show(Request $request): void

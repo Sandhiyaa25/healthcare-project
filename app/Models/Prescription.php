@@ -92,10 +92,42 @@ class Prescription
         return $stmt->execute([$status, $pharmacistId, $id, $tenantId]);
     }
 
-    public function getStats(int $tenantId): array
+    public function getStats(int $tenantId, ?int $doctorId = null): array
     {
-        $stmt = $this->db->prepare("SELECT status, COUNT(*) as count FROM prescriptions WHERE tenant_id = ? GROUP BY status");
-        $stmt->execute([$tenantId]);
+        if ($doctorId) {
+            $stmt = $this->db->prepare("
+                SELECT status, COUNT(*) as count FROM prescriptions
+                WHERE tenant_id = ? AND doctor_id = ? GROUP BY status
+            ");
+            $stmt->execute([$tenantId, $doctorId]);
+        } else {
+            $stmt = $this->db->prepare("
+                SELECT status, COUNT(*) as count FROM prescriptions
+                WHERE tenant_id = ? GROUP BY status
+            ");
+            $stmt->execute([$tenantId]);
+        }
+        return $stmt->fetchAll();
+    }
+
+    public function countByDateRange(int $tenantId, string $startDate, string $endDate): int
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*) FROM prescriptions
+            WHERE tenant_id = ? AND DATE(created_at) BETWEEN ? AND ?
+        ");
+        $stmt->execute([$tenantId, $startDate, $endDate]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    public function getStatsByDateRange(int $tenantId, string $startDate, string $endDate): array
+    {
+        $stmt = $this->db->prepare("
+            SELECT status, COUNT(*) as count FROM prescriptions
+            WHERE tenant_id = ? AND DATE(created_at) BETWEEN ? AND ?
+            GROUP BY status
+        ");
+        $stmt->execute([$tenantId, $startDate, $endDate]);
         return $stmt->fetchAll();
     }
 }
