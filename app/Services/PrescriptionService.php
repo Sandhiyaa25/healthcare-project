@@ -3,24 +3,41 @@
 namespace App\Services;
 
 use App\Models\Prescription;
+use App\Models\Patient;
 use App\Models\AuditLog;
 use App\Validators\PrescriptionValidator;
 use App\Exceptions\ValidationException;
 
 class PrescriptionService
 {
-    private Prescription $prescriptionModel;
-    private AuditLog     $auditLog;
+    private Prescription      $prescriptionModel;
+    private Patient           $patientModel;
+    private AuditLog          $auditLog;
+    private EncryptionService $encryption;
+
+    // AES-encrypted fields in prescriptions table
+    private const ENCRYPTED_FIELDS = ['notes', 'diagnosis'];
 
     public function __construct()
     {
         $this->prescriptionModel = new Prescription();
+        $this->patientModel      = new Patient();
         $this->auditLog          = new AuditLog();
+        $this->encryption        = new EncryptionService();
     }
 
     public function getAll(int $tenantId, array $filters, int $page, int $perPage): array
     {
-        return $this->prescriptionModel->getAll($tenantId, $filters, $page, $perPage);
+        $results = $this->prescriptionModel->getAll($tenantId, $filters, $page, $perPage);
+
+        if (empty($results)) {
+            $msg = !empty($filters['doctor_id'])
+                ? 'No prescriptions found for you in this tenant'
+                : 'No prescriptions found in your tenant';
+            return ['prescriptions' => [], 'message' => $msg];
+        }
+
+        return ['prescriptions' => array_map([$this, 'decryptRx'], $results)];
     }
 
     public function getById(int $id, int $tenantId): array
@@ -29,11 +46,7 @@ class PrescriptionService
         if (!$rx) {
             throw new ValidationException('Prescription not found');
         }
-        // Decode medicines JSON
-        if (is_string($rx['medicines'])) {
-            $rx['medicines'] = json_decode($rx['medicines'], true);
-        }
-        return $rx;
+        return $this->decryptRx($rx);
     }
 
     public function create(array $data, int $tenantId, int $doctorId, string $ip, string $userAgent): array
@@ -43,6 +56,15 @@ class PrescriptionService
         if (!empty($errors)) {
             throw new ValidationException('Validation failed', $errors);
         }
+
+        // Verify patient belongs to this tenant
+        $patient = $this->patientModel->findById((int)$data['patient_id'], $tenantId);
+        if (!$patient) {
+            throw new ValidationException('Patient not found in your tenant');
+        }
+
+        // Encrypt sensitive fields before storing
+        $data = $this->encryptFields($data);
 
         $rxId = $this->prescriptionModel->create(array_merge($data, [
             'tenant_id' => $tenantId,
@@ -89,5 +111,32 @@ class PrescriptionService
         ]);
 
         return $this->getById($id, $tenantId);
+    }
+
+    // ─── AES helpers ─────────────────────────────────────────────────
+
+    private function encryptFields(array $data): array
+    {
+        foreach (self::ENCRYPTED_FIELDS as $field) {
+            if (!empty($data[$field])) {
+                $data[$field] = $this->encryption->encryptField((string) $data[$field]);
+            }
+        }
+        return $data;
+    }
+
+    private function decryptRx(array $rx): array
+    {
+        // Decode medicines JSON
+        if (is_string($rx['medicines'])) {
+            $rx['medicines'] = json_decode($rx['medicines'], true);
+        }
+        // Decrypt encrypted text fields
+        foreach (self::ENCRYPTED_FIELDS as $field) {
+            if (!empty($rx[$field])) {
+                $rx[$field] = $this->encryption->decryptField($rx[$field]);
+            }
+        }
+        return $rx;
     }
 }

@@ -39,19 +39,29 @@ class AppointmentService
             return ['appointments' => [], 'message' => $msg];
         }
 
-        return ['appointments' => $results];
+        return ['appointments' => array_map([$this, 'decryptAppointment'], $results)];
     }
 
     public function getById(int $id, int $tenantId): array
     {
         $appt = $this->appointmentModel->findById($id, $tenantId);
         if (!$appt) {
-            // Check if it exists in another tenant
             $exists = $this->appointmentModel->findByIdOnly($id);
             if ($exists) {
                 throw new ValidationException('This appointment does not belong to your tenant');
             }
             throw new ValidationException('Appointment not found');
+        }
+        return $this->decryptAppointment($appt);
+    }
+
+    // ─── decrypt helper ─────────────────────────────────────────────
+    private function decryptAppointment(?array $appt): array
+    {
+        if (!$appt) return [];
+        $enc = new EncryptionService();
+        if (!empty($appt['notes'])) {
+            $appt['notes'] = $enc->decryptField($appt['notes']);
         }
         return $appt;
     }
@@ -82,6 +92,12 @@ class AppointmentService
             throw new ValidationException('Doctor already has an appointment in this time slot');
         }
 
+        // Encrypt notes before storing
+        if (!empty($data['notes'])) {
+            $enc        = new \App\Services\EncryptionService();
+            $data['notes'] = $enc->encryptField($data['notes']);
+        }
+
         $apptId = $this->appointmentModel->create(array_merge($data, ['tenant_id' => $tenantId]));
 
         $this->auditLog->log([
@@ -95,7 +111,7 @@ class AppointmentService
             'user_agent'   => $userAgent,
         ]);
 
-        return $this->appointmentModel->findById($apptId, $tenantId);
+        return $this->decryptAppointment($this->appointmentModel->findById($apptId, $tenantId));
     }
 
     public function update(int $id, array $data, int $tenantId, int $userId, string $ip, string $userAgent): array
@@ -140,7 +156,7 @@ class AppointmentService
             'user_agent'   => $userAgent,
         ]);
 
-        return $this->appointmentModel->findById($id, $tenantId);
+        return $this->decryptAppointment($this->appointmentModel->findById($id, $tenantId));
     }
 
     public function cancel(int $id, int $tenantId, int $userId, string $ip, string $userAgent): void
@@ -179,7 +195,7 @@ class AppointmentService
             return ['appointments' => [], 'message' => $msg];
         }
 
-        return ['appointments' => $results];
+        return ['appointments' => array_map([$this, 'decryptAppointment'], $results)];
     }
 
     /**
@@ -261,6 +277,6 @@ class AppointmentService
             'new_values'   => ['status' => $status],
         ]);
 
-        return $this->appointmentModel->findById($id, $tenantId);
+        return $this->decryptAppointment($this->appointmentModel->findById($id, $tenantId));
     }
 }

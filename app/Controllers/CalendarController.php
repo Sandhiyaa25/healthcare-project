@@ -24,17 +24,17 @@ class CalendarController
         $endDate   = $request->query('end_date',   date('Y-m-t'));
         $doctorId  = $request->query('doctor_id');
 
-        // Doctors see only their own calendar
+        // Doctors always see only their own calendar
         if ($role === 'doctor') {
             $doctorId = $userId;
         }
 
-        $events = $this->calendarService->getByDateRange($tenantId, $startDate, $endDate, [
+        $result = $this->calendarService->getByDateRange($tenantId, $startDate, $endDate, [
             'doctor_id' => $doctorId,
-            'role'      => $role,
         ]);
 
-        Response::success($events, 'Calendar events retrieved');
+        $msg = $result['message'] ?? 'Calendar events retrieved';
+        Response::success($result['events'] ?? [], $msg);
     }
 
     public function byDate(Request $request): void
@@ -49,7 +49,18 @@ class CalendarController
             $doctorId = $userId;
         }
 
-        $events = $this->calendarService->getByDate($tenantId, $date, $doctorId);
-        Response::success($events, 'Calendar events for date retrieved');
+        $result = $this->calendarService->getByDate($tenantId, $date, $doctorId);
+        $msg    = $result['message'] ?? 'Calendar events for date retrieved';
+        Response::success($result['events'] ?? [], $msg);
+    }
+
+    // Tooltip/hover detail for a specific appointment
+    public function eventDetail(Request $request): void
+    {
+        $tenantId      = (int) $request->getAttribute('auth_tenant_id');
+        $appointmentId = (int) $request->param('id');
+
+        $detail = $this->calendarService->getEventDetail($appointmentId, $tenantId);
+        Response::success($detail, 'Event detail retrieved');
     }
 }

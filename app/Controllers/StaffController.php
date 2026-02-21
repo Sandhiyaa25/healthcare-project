@@ -15,6 +15,7 @@ class StaffController
         $this->staffService = new StaffService();
     }
 
+    // GET — all roles can view staff list (tenant-scoped)
     public function index(Request $request): void
     {
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
@@ -22,10 +23,12 @@ class StaffController
         $page     = (int) $request->query('page', 1);
         $perPage  = (int) $request->query('per_page', 20);
 
-        $staff = $this->staffService->getAll($tenantId, $filters, $page, $perPage);
-        Response::success($staff, 'Staff retrieved');
+        $result = $this->staffService->getAll($tenantId, $filters, $page, $perPage);
+        $msg    = $result['message'] ?? 'Staff retrieved';
+        Response::success($result['staff'] ?? $result, $msg);
     }
 
+    // GET — all roles can view single staff
     public function show(Request $request): void
     {
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
@@ -35,32 +38,50 @@ class StaffController
         Response::success($staff, 'Staff retrieved');
     }
 
+    // POST — admin only
     public function store(Request $request): void
     {
+        $role = $request->getAttribute('auth_role');
+        if ($role !== 'admin') {
+            Response::forbidden('Only admin can create staff profiles', 'FORBIDDEN');
+        }
+
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
         $adminId  = (int) $request->getAttribute('auth_user_id');
 
         $staff = $this->staffService->create($request->all(), $tenantId, $adminId, $request->ip(), $request->userAgent());
-        Response::created($staff, 'Staff created');
+        Response::created($staff, 'Staff profile created successfully');
     }
 
+    // PUT — admin only
     public function update(Request $request): void
     {
+        $role = $request->getAttribute('auth_role');
+        if ($role !== 'admin') {
+            Response::forbidden('Only admin can update staff profiles', 'FORBIDDEN');
+        }
+
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
         $adminId  = (int) $request->getAttribute('auth_user_id');
         $staffId  = (int) $request->param('id');
 
         $staff = $this->staffService->update($staffId, $request->all(), $tenantId, $adminId, $request->ip(), $request->userAgent());
-        Response::success($staff, 'Staff updated');
+        Response::success($staff, 'Staff profile updated successfully');
     }
 
+    // DELETE — admin only
     public function destroy(Request $request): void
     {
+        $role = $request->getAttribute('auth_role');
+        if ($role !== 'admin') {
+            Response::forbidden('Only admin can delete staff profiles', 'FORBIDDEN');
+        }
+
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
         $adminId  = (int) $request->getAttribute('auth_user_id');
         $staffId  = (int) $request->param('id');
 
         $this->staffService->delete($staffId, $tenantId, $adminId, $request->ip(), $request->userAgent());
-        Response::success(null, 'Staff deleted');
+        Response::success(null, 'Staff profile deleted successfully');
     }
 }

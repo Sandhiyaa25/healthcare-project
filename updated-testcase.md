@@ -62,7 +62,7 @@ Content-Type: application/json
 
 > **Note:** Nurse, Receptionist, Pharmacist, and Patient users must be created via the Admin account. Use `POST /api/users` to create them, then `POST /api/patients` if creating a patient record.
 
----
+--- 
 
 ### 1.5 Platform Admin vs. Tenant Admin
 
