@@ -168,13 +168,42 @@ class Appointment
         return $stmt->fetchAll();
     }
 
-    public function getStats(int $tenantId): array
+    public function getStats(int $tenantId, ?int $doctorId = null): array
+    {
+        if ($doctorId) {
+            $stmt = $this->db->prepare("
+                SELECT status, COUNT(*) as count FROM appointments
+                WHERE tenant_id = ? AND doctor_id = ? GROUP BY status
+            ");
+            $stmt->execute([$tenantId, $doctorId]);
+        } else {
+            $stmt = $this->db->prepare("
+                SELECT status, COUNT(*) as count FROM appointments
+                WHERE tenant_id = ? GROUP BY status
+            ");
+            $stmt->execute([$tenantId]);
+        }
+        return $stmt->fetchAll();
+    }
+
+    public function countByDateRange(int $tenantId, string $startDate, string $endDate): int
+    {
+        $stmt = $this->db->prepare("
+            SELECT COUNT(*) FROM appointments
+            WHERE tenant_id = ? AND appointment_date BETWEEN ? AND ?
+        ");
+        $stmt->execute([$tenantId, $startDate, $endDate]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    public function getStatsByDateRange(int $tenantId, string $startDate, string $endDate): array
     {
         $stmt = $this->db->prepare("
             SELECT status, COUNT(*) as count FROM appointments
-            WHERE tenant_id = ? GROUP BY status
+            WHERE tenant_id = ? AND appointment_date BETWEEN ? AND ?
+            GROUP BY status
         ");
-        $stmt->execute([$tenantId]);
+        $stmt->execute([$tenantId, $startDate, $endDate]);
         return $stmt->fetchAll();
     }
 }

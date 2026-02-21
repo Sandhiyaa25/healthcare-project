@@ -85,10 +85,22 @@ class Invoice
     public function getSummary(int $tenantId): array
     {
         $stmt = $this->db->prepare("
-            SELECT status, COUNT(*) as count, SUM(total_amount) as total
+            SELECT status, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
             FROM invoices WHERE tenant_id = ? GROUP BY status
         ");
         $stmt->execute([$tenantId]);
+        return $stmt->fetchAll();
+    }
+
+    public function getSummaryByDateRange(int $tenantId, string $startDate, string $endDate): array
+    {
+        $stmt = $this->db->prepare("
+            SELECT status, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
+            FROM invoices
+            WHERE tenant_id = ? AND DATE(created_at) BETWEEN ? AND ?
+            GROUP BY status
+        ");
+        $stmt->execute([$tenantId, $startDate, $endDate]);
         return $stmt->fetchAll();
     }
 }
