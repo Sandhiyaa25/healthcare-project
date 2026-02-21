@@ -12,13 +12,12 @@ use Core\Database;
 
 class RegisterService
 {
-    private Tenant   $tenantModel;
-    private Role     $roleModel;
-    private User     $userModel;
-    private AuditLog $auditLog;
+    private Tenant            $tenantModel;
+    private Role              $roleModel;
+    private User              $userModel;
+    private AuditLog          $auditLog;
     private EncryptionService $encryption;
 
-    // Default roles to seed for each new tenant
     private const SYSTEM_ROLES = [
         ['name' => 'Admin',        'slug' => 'admin',        'description' => 'Full hospital admin access'],
         ['name' => 'Doctor',       'slug' => 'doctor',       'description' => 'Medical staff access'],
@@ -39,15 +38,12 @@ class RegisterService
 
     public function register(array $data, string $ip, string $userAgent): array
     {
-        // Validate
         $validator = new AuthValidator();
         $errors    = $validator->validateRegistration($data);
-
         if (!empty($errors)) {
             throw new ValidationException('Registration validation failed', $errors);
         }
 
-        // Check subdomain uniqueness
         $existing = $this->tenantModel->findBySubdomain($data['subdomain']);
         if ($existing) {
             throw new ValidationException('Subdomain is already taken', ['subdomain' => 'This subdomain is not available']);
@@ -57,11 +53,13 @@ class RegisterService
         $db->beginTransaction();
 
         try {
-            // Create tenant (status = inactive, awaiting approval)
+            // Encrypt tenant contact_email before storing
+            $encryptedContactEmail = $this->encryption->encryptField($data['contact_email']);
+
             $tenantId = $this->tenantModel->create([
-                'name'              => $data['hospital_name'],
-                'subdomain'         => strtolower(trim($data['subdomain'])),
-                'contact_email'     => $data['contact_email'],
+                'name'              => $data['hospital_name'],      // NOT encrypted
+                'subdomain'         => strtolower(trim($data['subdomain'])), // NOT encrypted
+                'contact_email'     => $encryptedContactEmail,      // ✅ encrypted
                 'contact_phone'     => $data['contact_phone'] ?? null,
                 'subscription_plan' => $data['subscription_plan'] ?? 'trial',
                 'status'            => 'inactive',
@@ -77,24 +75,23 @@ class RegisterService
                 }
             }
 
-            // Create admin user for this tenant
+            // Create admin user — encrypt PHI fields
             $passwordHash = $this->encryption->hashPassword($data['admin_password']);
-
-            $adminEmail = $data['contact_email'];
-            $emailBlind = $this->encryption->blindIndex($adminEmail);
-            $fnBlind    = $this->encryption->blindIndex($data['admin_first_name'] ?? '');
-            $lnBlind    = $this->encryption->blindIndex($data['admin_last_name'] ?? '');
+            $adminEmail   = $data['contact_email'];
+            $emailBlind   = $this->encryption->blindIndex($adminEmail);
+            $fnBlind      = $this->encryption->blindIndex($data['admin_first_name'] ?? '');
+            $lnBlind      = $this->encryption->blindIndex($data['admin_last_name'] ?? '');
 
             $adminUserId = $this->userModel->create([
                 'tenant_id'               => $tenantId,
                 'role_id'                 => $adminRoleId,
-                'username'                => $data['admin_username'],
-                'email'                   => $adminEmail,
+                'username'                => $data['admin_username'],   // NOT encrypted
+                'email'                   => $this->encryption->encryptField($adminEmail),
                 'email_blind_index'       => $emailBlind,
-                'password_hash'           => $passwordHash,
-                'first_name'              => $data['admin_first_name'] ?? null,
+                'password_hash'           => $passwordHash,             // bcrypt, NOT AES
+                'first_name'              => $this->encryption->encryptField($data['admin_first_name'] ?? null),
                 'first_name_blind_index'  => $fnBlind,
-                'last_name'               => $data['admin_last_name'] ?? null,
+                'last_name'               => $this->encryption->encryptField($data['admin_last_name'] ?? null),
                 'last_name_blind_index'   => $lnBlind,
                 'status'                  => 'active',
             ]);
@@ -114,10 +111,11 @@ class RegisterService
             ]);
 
             return [
-                'tenant_id'   => $tenantId,
-                'message'     => 'Registration successful. Your account is pending approval.',
-                'subdomain'   => $data['subdomain'],
+                'tenant_id' => $tenantId,
+                'message'   => 'Registration successful. Your account is pending approval.',
+                'subdomain' => $data['subdomain'],
             ];
+
         } catch (\Throwable $e) {
             $db->rollBack();
             throw $e;

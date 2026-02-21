@@ -1,11 +1,11 @@
-<?php
-
 namespace App\Services;
+
 
 use App\Models\MedicalRecord;
 use App\Models\Patient;
 use App\Models\AuditLog;
 use App\Exceptions\ValidationException;
+
 
 class RecordService
 {
@@ -14,10 +14,12 @@ class RecordService
     private AuditLog          $auditLog;
     private EncryptionService $encryption;
 
+
     // AES-encrypted text fields in medical_records table
     private const ENCRYPTED_FIELDS = [
         'chief_complaint', 'diagnosis', 'treatment', 'notes',
     ];
+
 
     public function __construct()
     {
@@ -27,6 +29,7 @@ class RecordService
         $this->encryption   = new EncryptionService();
     }
 
+
     public function getByPatient(int $patientId, int $tenantId, int $page, int $perPage): array
     {
         // Verify patient belongs to this tenant
@@ -35,14 +38,18 @@ class RecordService
             throw new ValidationException('Patient not found in your tenant');
         }
 
+
         $records = $this->recordModel->getByPatient($patientId, $tenantId, $page, $perPage);
+
 
         if (empty($records)) {
             throw new ValidationException('No medical records found for this patient');
         }
 
+
         return array_map([$this, 'decryptRecord'], $records);
     }
+
 
     public function getById(int $id, int $tenantId): array
     {
@@ -53,6 +60,7 @@ class RecordService
         return $this->decryptRecord($record);
     }
 
+
     public function create(array $data, int $tenantId, int $userId, string $role, string $ip, string $userAgent): array
     {
         // Only doctor and nurse can create
@@ -60,9 +68,11 @@ class RecordService
             throw new ValidationException('Only doctors and nurses can create medical records');
         }
 
+
         if (empty($data['patient_id'])) {
             throw new ValidationException('patient_id is required');
         }
+
 
         // Verify patient belongs to THIS tenant
         $patient = $this->patientModel->findById((int) $data['patient_id'], $tenantId);
@@ -70,13 +80,16 @@ class RecordService
             throw new ValidationException('Patient not found in your tenant. You can only create records for patients in your own tenant.');
         }
 
+
         // Encrypt text fields before storing
         $data = $this->encryptFields($data);
+
 
         $recordId = $this->recordModel->create(array_merge($data, [
             'tenant_id' => $tenantId,
             'doctor_id' => $userId,
         ]));
+
 
         $this->auditLog->log([
             'tenant_id'    => $tenantId,
@@ -89,8 +102,10 @@ class RecordService
             'user_agent'   => $userAgent,
         ]);
 
+
         return $this->getById($recordId, $tenantId);
     }
+
 
     public function update(int $id, array $data, int $tenantId, int $userId, string $role, string $ip, string $userAgent): array
     {
@@ -99,15 +114,19 @@ class RecordService
             throw new ValidationException('Only doctors and nurses can update medical records');
         }
 
+
         $record = $this->recordModel->findById($id, $tenantId);
         if (!$record) {
             throw new ValidationException('Medical record not found in your tenant');
         }
 
+
         // Encrypt text fields before storing
         $data = $this->encryptFields($data);
 
+
         $this->recordModel->update($id, $tenantId, $data);
+
 
         $this->auditLog->log([
             'tenant_id'    => $tenantId,
@@ -120,10 +139,13 @@ class RecordService
             'user_agent'   => $userAgent,
         ]);
 
+
         return $this->getById($id, $tenantId);
     }
 
+
     // ─── AES helpers ─────────────────────────────────────────────────
+
 
     private function encryptFields(array $data): array
     {
@@ -134,6 +156,7 @@ class RecordService
         }
         return $data;
     }
+
 
     private function decryptRecord(array $record): array
     {

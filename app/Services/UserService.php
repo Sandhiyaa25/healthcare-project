@@ -12,11 +12,14 @@ use App\Exceptions\AuthException;
 
 class UserService
 {
-    private User     $userModel;
-    private Role     $roleModel;
-    private Tenant   $tenantModel;
-    private AuditLog $auditLog;
+    private User              $userModel;
+    private Role              $roleModel;
+    private Tenant            $tenantModel;
+    private AuditLog          $auditLog;
     private EncryptionService $encryption;
+
+    // AES-encrypted fields in users table (NOT username, NOT password_hash)
+    private const ENCRYPTED_FIELDS = ['email', 'first_name', 'last_name', 'phone'];
 
     public function __construct()
     {
@@ -33,7 +36,7 @@ class UserService
             $filters['search_blind_index'] = $this->encryption->blindIndex($filters['search']);
         }
         $users = $this->userModel->getAll($tenantId, $filters, $page, $perPage);
-        return array_map([$this, 'safeUser'], $users);
+        return array_map([$this, 'decryptAndSafeUser'], $users);
     }
 
     public function getById(int $id, int $tenantId): array
@@ -42,7 +45,7 @@ class UserService
         if (!$user) {
             throw new ValidationException('User not found');
         }
-        return $this->safeUser($user);
+        return $this->decryptAndSafeUser($user);
     }
 
     public function create(array $data, int $tenantId, int $createdByUserId, string $ip, string $userAgent): array
@@ -53,20 +56,18 @@ class UserService
             throw new ValidationException('Validation failed', $errors);
         }
 
-        // Verify role belongs to tenant
         $role = $this->roleModel->findById((int) $data['role_id'], $tenantId);
         if (!$role) {
             throw new ValidationException('Invalid role for this tenant');
         }
 
-        // Check email uniqueness (via blind index)
+        // Blind indexes from plaintext BEFORE encryption
         $emailBlind = $this->encryption->blindIndex($data['email']);
         $existing   = $this->userModel->findByEmailBlindIndex($emailBlind, $tenantId);
         if ($existing) {
             throw new ValidationException('Validation failed', ['email' => 'Email already exists']);
         }
 
-        // Check max users
         $tenant = $this->tenantModel->findById($tenantId);
         $count  = $this->tenantModel->countUsers($tenantId);
         if ($count >= $tenant['max_users']) {
@@ -77,18 +78,19 @@ class UserService
         $fnBlind      = $this->encryption->blindIndex($data['first_name'] ?? '');
         $lnBlind      = $this->encryption->blindIndex($data['last_name'] ?? '');
 
+        // Encrypt sensitive fields
         $userId = $this->userModel->create([
             'tenant_id'               => $tenantId,
             'role_id'                 => $data['role_id'],
-            'username'                => $data['username'],
-            'email'                   => $data['email'],
+            'username'                => $data['username'],          // NOT encrypted
+            'email'                   => $this->encryption->encryptField($data['email']),
             'email_blind_index'       => $emailBlind,
-            'password_hash'           => $passwordHash,
-            'first_name'              => $data['first_name'] ?? null,
+            'password_hash'           => $passwordHash,              // bcrypt hash, NOT AES
+            'first_name'              => $this->encryption->encryptField($data['first_name'] ?? null),
             'first_name_blind_index'  => $fnBlind,
-            'last_name'               => $data['last_name'] ?? null,
+            'last_name'               => $this->encryption->encryptField($data['last_name'] ?? null),
             'last_name_blind_index'   => $lnBlind,
-            'phone'                   => $data['phone'] ?? null,
+            'phone'                   => $this->encryption->encryptField($data['phone'] ?? null),
             'status'                  => $data['status'] ?? 'active',
         ]);
 
@@ -104,7 +106,7 @@ class UserService
             'new_values'   => ['username' => $data['username'], 'role_id' => $data['role_id']],
         ]);
 
-        return $this->safeUser($this->userModel->findById($userId, $tenantId));
+        return $this->decryptAndSafeUser($this->userModel->findById($userId, $tenantId));
     }
 
     public function update(int $id, array $data, int $tenantId, int $updatedByUserId, string $ip, string $userAgent): array
@@ -114,9 +116,8 @@ class UserService
             throw new ValidationException('User not found');
         }
 
-        // Block password in update
         if (isset($data['password'])) {
-            throw new ValidationException('Validation failed', ['password' => 'Password cannot be changed through this endpoint. Use PUT /api/users/me/password']);
+            throw new ValidationException('Validation failed', ['password' => 'Use PUT /api/users/me/password to change password']);
         }
 
         $validator = new UserValidator();
@@ -125,7 +126,6 @@ class UserService
             throw new ValidationException('Validation failed', $errors);
         }
 
-        // Verify role
         $role = $this->roleModel->findById((int) $data['role_id'], $tenantId);
         if (!$role) {
             throw new ValidationException('Invalid role for this tenant');
@@ -135,11 +135,11 @@ class UserService
         $lnBlind = $this->encryption->blindIndex($data['last_name'] ?? '');
 
         $this->userModel->update($id, $tenantId, [
-            'first_name'             => $data['first_name'] ?? null,
+            'first_name'             => $this->encryption->encryptField($data['first_name'] ?? null),
             'first_name_blind_index' => $fnBlind,
-            'last_name'              => $data['last_name'] ?? null,
+            'last_name'              => $this->encryption->encryptField($data['last_name'] ?? null),
             'last_name_blind_index'  => $lnBlind,
-            'phone'                  => $data['phone'] ?? null,
+            'phone'                  => $this->encryption->encryptField($data['phone'] ?? null),
             'status'                 => $data['status'] ?? $user['status'],
             'role_id'                => $data['role_id'],
         ]);
@@ -153,11 +153,9 @@ class UserService
             'resource_id'  => $id,
             'ip_address'   => $ip,
             'user_agent'   => $userAgent,
-            'old_values'   => ['first_name' => $user['first_name'], 'last_name' => $user['last_name']],
-            'new_values'   => ['first_name' => $data['first_name'], 'last_name' => $data['last_name']],
         ]);
 
-        return $this->safeUser($this->userModel->findById($id, $tenantId));
+        return $this->decryptAndSafeUser($this->userModel->findById($id, $tenantId));
     }
 
     public function changeMyPassword(int $userId, int $tenantId, array $data, string $ip, string $userAgent): void
@@ -249,8 +247,15 @@ class UserService
         ]);
     }
 
-    private function safeUser(array $user): array
+    // ─── AES helpers ─────────────────────────────────────────────────
+
+    private function decryptAndSafeUser(array $user): array
     {
+        foreach (self::ENCRYPTED_FIELDS as $field) {
+            if (!empty($user[$field])) {
+                $user[$field] = $this->encryption->decryptField($user[$field]);
+            }
+        }
         unset($user['password_hash'], $user['email_blind_index'], $user['first_name_blind_index'], $user['last_name_blind_index']);
         return $user;
     }

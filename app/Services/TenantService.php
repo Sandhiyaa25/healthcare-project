@@ -25,12 +25,14 @@ class TenantService
 
     public function getAll(int $page, int $perPage, ?string $status = null): array
     {
-        return $this->tenantModel->getAll($page, $perPage, $status);
+        $tenants = $this->tenantModel->getAll($page, $perPage, $status);
+        return array_map([$this, 'decryptTenant'], $tenants);
     }
 
     public function getById(int $id): ?array
     {
-        return $this->tenantModel->findById($id);
+        $tenant = $this->tenantModel->findById($id);
+        return $tenant ? $this->decryptTenant($tenant) : null;
     }
 
     public function approve(int $id, int $adminId): array
@@ -115,5 +117,13 @@ class TenantService
     public function getRoles(int $tenantId): array
     {
         return $this->roleModel->getAllByTenant($tenantId);
+    }
+
+    private function decryptTenant(array $tenant): array
+    {
+        if (!empty($tenant['contact_email'])) {
+            $tenant['contact_email'] = $this->encryption->decryptField($tenant['contact_email']);
+        }
+        return $tenant;
     }
 }

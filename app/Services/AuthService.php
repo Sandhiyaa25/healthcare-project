@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\User;
 use App\Models\Tenant;
 use App\Models\RefreshToken;
+use App\Models\CsrfToken;
 use App\Models\AuditLog;
 use App\Exceptions\AuthException;
 use App\Exceptions\ValidationException;
@@ -18,7 +19,7 @@ class AuthService
     private AuditLog       $auditLog;
     private EncryptionService $encryption;
 
-    // In-memory CSRF store (per-request); actual CSRF tokens are JWT-signed
+    private CsrfToken $csrfTokenModel;
     private array $config;
 
     public function __construct()
@@ -28,6 +29,7 @@ class AuthService
         $this->refreshTokenModel = new RefreshToken();
         $this->auditLog          = new AuditLog();
         $this->encryption        = new EncryptionService();
+        $this->csrfTokenModel    = new CsrfToken();
         $this->config            = require ROOT_PATH . '/config/jwt.php';
     }
 
@@ -137,6 +139,9 @@ class AuthService
         // Revoke all refresh tokens for this user+tenant combination
         $this->refreshTokenModel->revokeAllForUser($userId, $tenantId);
 
+        // ✅ Delete CSRF token from sessions table
+        $this->csrfTokenModel->deleteForUser($userId, $tenantId);
+
         // Clear refresh token cookie
         $this->clearRefreshTokenCookie();
 
@@ -170,12 +175,12 @@ class AuthService
             throw new AuthException('User account not found or inactive');
         }
 
-        // Token rotation: revoke old, issue new
+        // Token rotation: revoke old refresh token, issue new access + refresh tokens
+        // CSRF token is NOT regenerated — created at login, lives until logout
         $this->refreshTokenModel->revoke($tokenHash);
 
         $newAccessToken  = $this->generateAccessToken($user);
         $newRefreshToken = $this->generateRefreshToken($user, $ip, $userAgent);
-        $csrfToken       = $this->generateCsrfToken($user['id'], $stored['tenant_id']);
 
         $this->setRefreshTokenCookie($newRefreshToken);
 
@@ -191,7 +196,6 @@ class AuthService
 
         return [
             'access_token' => $newAccessToken,
-            'csrf_token'   => $csrfToken,
             'token_type'   => 'Bearer',
             'expires_in'   => $this->config['expiry'],
         ];
@@ -235,17 +239,16 @@ class AuthService
 
     public function generateCsrfToken(int $userId, int $tenantId): string
     {
-        $now     = time();
-        $payload = [
-            'type'      => 'csrf',
-            'user_id'   => $userId,
-            'tenant_id' => $tenantId,
-            'iat'       => $now,
-            'exp'       => $now + (int) Env::get('CSRF_EXPIRY', 3600),
-            'jti'       => bin2hex(random_bytes(16)),
-        ];
+        // Generate a cryptographically secure random string
+        $rawToken  = bin2hex(random_bytes(32)); // 64-char hex string
+        $tokenHash = hash('sha256', $rawToken); // store hash in DB
+        $expiresIn = (int) Env::get('CSRF_EXPIRY', 3600);
 
-        return $this->encodeJwt($payload);
+        // Store hash in sessions table (deleted on logout)
+        $this->csrfTokenModel->store($userId, $tenantId, $tokenHash, $expiresIn);
+
+        // Return the raw token to the client
+        return $rawToken;
     }
 
     // ─── VALIDATE TOKENS ────────────────────────────────────────────
@@ -258,10 +261,6 @@ class AuthService
             return null;
         }
 
-        if (isset($payload['type']) && $payload['type'] === 'csrf') {
-            return null; // Reject CSRF tokens used as access tokens
-        }
-
         if (!isset($payload['sub'], $payload['tenant_id'], $payload['role'])) {
             return null;
         }
@@ -271,17 +270,20 @@ class AuthService
 
     public function validateCsrfToken(string $token, ?int $userId): bool
     {
-        $payload = $this->decodeJwt($token);
-
-        if (!$payload) {
+        if (empty($token)) {
             return false;
         }
 
-        if (($payload['type'] ?? '') !== 'csrf') {
-            return false;
+        // Hash the incoming token and look up in sessions table
+        $tokenHash = hash('sha256', $token);
+        $stored    = $this->csrfTokenModel->findByHash($tokenHash);
+
+        if (!$stored) {
+            return false; // not found or expired
         }
 
-        if ($userId !== null && (int) ($payload['user_id'] ?? 0) !== $userId) {
+        // Verify it belongs to the authenticated user
+        if ($userId !== null && (int) $stored['user_id'] !== $userId) {
             return false;
         }
 
@@ -373,6 +375,13 @@ class AuthService
 
     private function safeUser(array $user): array
     {
+        // Decrypt AES-encrypted fields before returning to client
+        $enc = new EncryptionService();
+        foreach (['email', 'first_name', 'last_name', 'phone'] as $field) {
+            if (!empty($user[$field])) {
+                $user[$field] = $enc->decryptField($user[$field]);
+            }
+        }
         unset($user['password_hash'], $user['email_blind_index'], $user['first_name_blind_index'], $user['last_name_blind_index']);
         return $user;
     }

@@ -14,11 +14,11 @@ class PatientService
     private EncryptionService $encryption;
 
     // AES-encrypted fields — everything except IDs, statuses, non-PHI
-    private const ENCRYPTED_FIELDS = [
-        'first_name', 'last_name', 'email', 'phone',
-        'address', 'date_of_birth', 'allergies', 'medical_notes',
-        'emergency_contact_name', 'emergency_contact_phone',
-    ];
+private const ENCRYPTED_FIELDS = [
+    'first_name', 'last_name', 'email', 'phone',
+    'address', 'date_of_birth', 'allergies', 'medical_notes',
+    'emergency_contact_name', 'emergency_contact_phone',
+];
 
     public function __construct()
     {

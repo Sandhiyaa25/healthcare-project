@@ -164,27 +164,10 @@ CREATE TABLE refresh_tokens (
     INDEX idx_tenant_user (tenant_id, user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
--- 8. SESSIONS (optional JWT blacklist/tracking)
--- ==========================================
-CREATE TABLE sessions (
-    id         INT PRIMARY KEY AUTO_INCREMENT,
-    user_id    INT          NOT NULL,
-    tenant_id  INT          NOT NULL,
-    token_hash VARCHAR(255) NOT NULL,
-    ip_address VARCHAR(45)  NULL,
-    user_agent TEXT         NULL,
-    expires_at TIMESTAMP    NOT NULL,
-    created_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id)   REFERENCES users(id)   ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
-    INDEX idx_token   (token_hash),
-    INDEX idx_user    (user_id),
-    INDEX idx_expires (expires_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 
 -- ==========================================
--- 9. PATIENTS (hospital patients, NOT system users)
+-- 8. PATIENTS (hospital patients, NOT system users)
 -- ==========================================
 CREATE TABLE patients (
     id                      INT PRIMARY KEY AUTO_INCREMENT,
@@ -218,7 +201,7 @@ CREATE TABLE patients (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==========================================
--- 10. APPOINTMENTS
+-- 9. APPOINTMENTS
 -- ==========================================
 CREATE TABLE appointments (
     id               INT PRIMARY KEY AUTO_INCREMENT,
@@ -243,7 +226,7 @@ CREATE TABLE appointments (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==========================================
--- 11. PRESCRIPTIONS
+-- 10. PRESCRIPTIONS
 -- ==========================================
 CREATE TABLE prescriptions (
     id             INT PRIMARY KEY AUTO_INCREMENT,
@@ -270,7 +253,7 @@ CREATE TABLE prescriptions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==========================================
--- 12. INVOICES
+-- 11. INVOICES
 -- ==========================================
 CREATE TABLE invoices (
     id             INT PRIMARY KEY AUTO_INCREMENT,
@@ -295,7 +278,7 @@ CREATE TABLE invoices (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==========================================
--- 13. PAYMENTS
+-- 12. PAYMENTS
 -- ==========================================
 CREATE TABLE payments (
     id               INT PRIMARY KEY AUTO_INCREMENT,
@@ -315,7 +298,7 @@ CREATE TABLE payments (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==========================================
--- 14. STAFF
+-- 13. STAFF
 -- ==========================================
 CREATE TABLE staff (
     id               INT PRIMARY KEY AUTO_INCREMENT,
@@ -338,7 +321,7 @@ CREATE TABLE staff (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==========================================
--- 15. MESSAGES (appointment-based notes/communications)
+-- 14. MESSAGES (appointment-based notes/communications)
 -- ==========================================
 CREATE TABLE messages (
     id             INT PRIMARY KEY AUTO_INCREMENT,
@@ -356,7 +339,7 @@ CREATE TABLE messages (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==========================================
--- 16. MEDICAL RECORDS
+-- 15. MEDICAL RECORDS
 -- ==========================================
 CREATE TABLE medical_records (
     id              INT PRIMARY KEY AUTO_INCREMENT,
@@ -383,7 +366,7 @@ CREATE TABLE medical_records (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==========================================
--- 17. AUDIT LOGS
+-- 16. AUDIT LOGS
 -- ==========================================
 CREATE TABLE audit_logs (
     id            INT PRIMARY KEY AUTO_INCREMENT,
@@ -408,7 +391,52 @@ CREATE TABLE audit_logs (
     INDEX idx_action_status (action, status),
     INDEX idx_created_at    (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- ==========================================
+-- 17. SESSION
+-- ==========================================
 
+CREATE TABLE sessions (
+    id         INT PRIMARY KEY AUTO_INCREMENT,
+    user_id    INT          NOT NULL,
+    tenant_id  INT          NOT NULL,
+    token_hash VARCHAR(255) NOT NULL,
+    ip_address VARCHAR(45)  NULL,
+    user_agent TEXT         NULL,
+    expires_at TIMESTAMP    NOT NULL,
+    created_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id)   REFERENCES users(id)   ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    INDEX idx_token   (token_hash),
+    INDEX idx_user    (user_id),
+    INDEX idx_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- ==========================================
+-- Found Bugs Alter This
+-- ==========================================
+-- MANDATORY: Fix unique constraint for encrypted email
+ALTER TABLE users DROP INDEX unique_email_per_tenant;
+ALTER TABLE users DROP INDEX idx_email;
+ALTER TABLE users ADD UNIQUE KEY unique_email_blind_per_tenant (tenant_id, email_blind_index);
+
+-- MANDATORY: Expand columns to hold encrypted values
+ALTER TABLE users 
+    MODIFY email      VARCHAR(500) NOT NULL,
+    MODIFY first_name VARCHAR(500) NULL,
+    MODIFY last_name  VARCHAR(500) NULL,
+    MODIFY phone      VARCHAR(500) NULL;
+
+-- MANDATORY: Same for patients table
+ALTER TABLE patients
+    MODIFY first_name              VARCHAR(500) NULL,
+    MODIFY last_name               VARCHAR(500) NULL,
+    MODIFY email                   VARCHAR(500) NULL,
+    MODIFY phone                   VARCHAR(500) NULL,
+    MODIFY address                 TEXT,
+    MODIFY date_of_birth           VARCHAR(500) NULL,
+    MODIFY allergies               TEXT,
+    MODIFY medical_notes           TEXT,
+    MODIFY emergency_contact_name  VARCHAR(500) NULL,
+    MODIFY emergency_contact_phone VARCHAR(500) NULL;
 -- ==========================================
 -- SEED DATA
 -- ==========================================
@@ -511,7 +539,7 @@ WHERE slug IN (
 -- Hash generated with password_hash('Admin@123456', PASSWORD_BCRYPT, ['cost'=>12])
 INSERT INTO users (tenant_id, role_id, username, email, password_hash, first_name, last_name, status) VALUES
 (@tenant_id, @admin_role, 'admin', 'admin@apollo-chennai.com',
- '$2y$12$eImiTXuWVxfM37uY4JANjQ==.==', 'Super', 'Admin', 'active');
+ '$2y$10$dfjPLDhSzeVtf8ikoJKmAeaeEiY4QafQzH7xheZ.CHRx3d5L2XGEe', 'Super', 'Admin', 'active');
 
 -- NOTE: The password hash above is a placeholder.
 -- To generate a real hash, run this PHP:
@@ -521,15 +549,11 @@ INSERT INTO users (tenant_id, role_id, username, email, password_hash, first_nam
 -- Seed doctor user (password: Doctor@123456)
 INSERT INTO users (tenant_id, role_id, username, email, password_hash, first_name, last_name, status) VALUES
 (@tenant_id, @doctor_role, 'dr_sharma', 'sharma@apollo-chennai.com',
- '$2y$12$eImiTXuWVxfM37uY4JANjQ==.==', 'Rajesh', 'Sharma', 'active');
+ '$2y$10$YGs4o7HXTPHhX2EJd1e9fuU0nN99exNM2KMEBKrAELKIDO0TkqC/i', 'Rajesh', 'Sharma', 'active');
 
 -- Platform admin (password: Platform@123)
 INSERT INTO platform_admins (username, email, password_hash) VALUES (
     'platform_admin',
     'admin@hospital-platform.com',
-    '$2y$10$bBTpLuuIKkIaY3ry0imBUeudWUsID/QFLkBtmF5SoJHhbRWiDFNBW'
+    '$2y$10$/93XGPVSvBw9bWVtaDmKeuiDY5tCqsM6aeEDgTakWX.XFhAYyVaS.'
 ) ON DUPLICATE KEY UPDATE username = username;
---hash password
--- UPDATE platform_admins SET password_hash = 'first_hash'  WHERE username = 'platform_admin';
--- UPDATE users SET password_hash = 'second_hash' WHERE username = 'admin';
--- UPDATE users SET password_hash = 'third_hash'  WHERE username = 'dr_sharma';
