@@ -40,8 +40,6 @@ spl_autoload_register(function (string $class): void {
     }
 });
 
-// ─── Load .env ───────────────────────────────────────────────────────────────
-
 \Core\Env::load(ROOT_PATH . '/.env');
 
 // ─── Register exception handler ──────────────────────────────────────────────
