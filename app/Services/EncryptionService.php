@@ -17,26 +17,53 @@ class EncryptionService
         $this->blindIndexKey = $config['blind_index_key'];
     }
 
-    // ─── AES Encrypt (for future use) ──────────────────────────────
+    // ─── AES Encrypt / Decrypt ──────────────────────────────────────
 
     public function encrypt(string $plaintext): string
     {
-        $ivLength = openssl_cipher_iv_length($this->cipher);
-        $iv       = openssl_random_pseudo_bytes($ivLength);
+        $ivLength  = openssl_cipher_iv_length($this->cipher);
+        $iv        = openssl_random_pseudo_bytes($ivLength);
         $encrypted = openssl_encrypt($plaintext, $this->cipher, $this->key, 0, $iv);
-
         return base64_encode($iv . '::' . $encrypted);
     }
 
     public function decrypt(string $ciphertext): string
     {
-        $decoded  = base64_decode($ciphertext);
+        $decoded = base64_decode($ciphertext);
+        if (strpos($decoded, '::') === false) {
+            return $ciphertext; // already plaintext (legacy data)
+        }
         [$iv, $encrypted] = explode('::', $decoded, 2);
-
-        return openssl_decrypt($encrypted, $this->cipher, $this->key, 0, $iv);
+        $result = openssl_decrypt($encrypted, $this->cipher, $this->key, 0, $iv);
+        return $result !== false ? $result : $ciphertext;
     }
 
-    // ─── Blind Index (HMAC-SHA256 for searchable encrypted fields) ──
+    // ─── Safe nullable helpers for DB fields ────────────────────────
+
+    /**
+     * Encrypt a value — returns null if value is null/empty.
+     */
+    public function encryptField(?string $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        return $this->encrypt($value);
+    }
+
+    /**
+     * Decrypt a value — returns null if value is null/empty.
+     * Safe to call even if value is already plaintext.
+     */
+    public function decryptField(?string $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        return $this->decrypt($value);
+    }
+
+    // ─── Blind Index ────────────────────────────────────────────────
 
     public function blindIndex(string $value): string
     {
@@ -56,7 +83,7 @@ class EncryptionService
         return password_verify($password, $hash);
     }
 
-    // ─── Token Hashing (for refresh tokens) ────────────────────────
+    // ─── Token Hashing ──────────────────────────────────────────────
 
     public function hashToken(string $token): string
     {

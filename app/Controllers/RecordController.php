@@ -38,9 +38,12 @@ class RecordController
     public function store(Request $request): void
     {
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
-        $doctorId = (int) $request->getAttribute('auth_user_id');
+        $userId   = (int) $request->getAttribute('auth_user_id');
+        $role     = $request->getAttribute('auth_role');
 
-        $record = $this->recordService->create($request->all(), $tenantId, $doctorId, $request->ip(), $request->userAgent());
+        $record = $this->recordService->create(
+            $request->all(), $tenantId, $userId, $role, $request->ip(), $request->userAgent()
+        );
         Response::created($record, 'Medical record created');
     }
 
@@ -48,9 +51,12 @@ class RecordController
     {
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
         $userId   = (int) $request->getAttribute('auth_user_id');
+        $role     = $request->getAttribute('auth_role');
         $recordId = (int) $request->param('id');
 
-        $record = $this->recordService->update($recordId, $request->all(), $tenantId, $userId, $request->ip(), $request->userAgent());
+        $record = $this->recordService->update(
+            $recordId, $request->all(), $tenantId, $userId, $role, $request->ip(), $request->userAgent()
+        );
         Response::success($record, 'Medical record updated');
     }
 }
