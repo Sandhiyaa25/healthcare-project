@@ -1,8 +1,7 @@
--- ==========================================
+
 -- HEALTHCARE APPLICATION DATABASE SCHEMA
 -- Multi-tenant, RBAC, Audit-ready
 -- Engine: InnoDB | Charset: utf8mb4
--- ==========================================
 
 SET FOREIGN_KEY_CHECKS = 0;
 
@@ -26,9 +25,9 @@ DROP TABLE IF EXISTS tenants;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
--- ==========================================
+
 -- 1. TENANTS
--- ==========================================
+
 CREATE TABLE tenants (
     id                      INT PRIMARY KEY AUTO_INCREMENT,
     name                    VARCHAR(255) NOT NULL,
@@ -46,9 +45,9 @@ CREATE TABLE tenants (
     INDEX idx_status    (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+
 -- 2. PLATFORM ADMINS (approve/reject tenants)
--- ==========================================
+
 CREATE TABLE platform_admins (
     id            INT PRIMARY KEY AUTO_INCREMENT,
     username      VARCHAR(100) NOT NULL UNIQUE,
@@ -59,9 +58,9 @@ CREATE TABLE platform_admins (
     updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 3. ROLES (scoped per tenant)
--- ==========================================
+ 
 CREATE TABLE roles (
     id             INT PRIMARY KEY AUTO_INCREMENT,
     tenant_id      INT          NOT NULL,
@@ -76,9 +75,9 @@ CREATE TABLE roles (
     INDEX idx_tenant_role (tenant_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+
 -- 4. PERMISSIONS
--- ==========================================
+
 CREATE TABLE permissions (
     id          INT PRIMARY KEY AUTO_INCREMENT,
     name        VARCHAR(100) NOT NULL UNIQUE,
@@ -89,9 +88,9 @@ CREATE TABLE permissions (
     INDEX idx_module (module)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 5. ROLE_PERMISSIONS
--- ==========================================
+ 
 CREATE TABLE role_permissions (
     id            INT PRIMARY KEY AUTO_INCREMENT,
     role_id       INT NOT NULL,
@@ -104,9 +103,9 @@ CREATE TABLE role_permissions (
     INDEX idx_permission (permission_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 6. USERS (system login users, per tenant)
--- ==========================================
+ 
 CREATE TABLE users (
     id                     INT PRIMARY KEY AUTO_INCREMENT,
     tenant_id              INT          NOT NULL,
@@ -142,9 +141,9 @@ CREATE TABLE users (
     INDEX idx_last_name_blind  (last_name_blind_index)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 7. REFRESH TOKENS
--- ==========================================
+ 
 CREATE TABLE refresh_tokens (
     id         INT PRIMARY KEY AUTO_INCREMENT,
     user_id    INT          NOT NULL,
@@ -164,11 +163,9 @@ CREATE TABLE refresh_tokens (
     INDEX idx_tenant_user (tenant_id, user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-
-
--- ==========================================
+ 
 -- 8. PATIENTS (hospital patients, NOT system users)
--- ==========================================
+ 
 CREATE TABLE patients (
     id                      INT PRIMARY KEY AUTO_INCREMENT,
     tenant_id               INT          NOT NULL,
@@ -200,9 +197,9 @@ CREATE TABLE patients (
     INDEX idx_status           (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 9. APPOINTMENTS
--- ==========================================
+ 
 CREATE TABLE appointments (
     id               INT PRIMARY KEY AUTO_INCREMENT,
     tenant_id        INT       NOT NULL,
@@ -225,9 +222,9 @@ CREATE TABLE appointments (
     INDEX idx_date_status (appointment_date, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 10. PRESCRIPTIONS
--- ==========================================
+ 
 CREATE TABLE prescriptions (
     id             INT PRIMARY KEY AUTO_INCREMENT,
     tenant_id      INT       NOT NULL,
@@ -252,9 +249,9 @@ CREATE TABLE prescriptions (
     INDEX idx_status     (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 11. INVOICES
--- ==========================================
+ 
 CREATE TABLE invoices (
     id             INT PRIMARY KEY AUTO_INCREMENT,
     tenant_id      INT           NOT NULL,
@@ -277,9 +274,9 @@ CREATE TABLE invoices (
     INDEX idx_status         (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 12. PAYMENTS
--- ==========================================
+ 
 CREATE TABLE payments (
     id               INT PRIMARY KEY AUTO_INCREMENT,
     tenant_id        INT           NOT NULL,
@@ -297,9 +294,9 @@ CREATE TABLE payments (
     INDEX idx_patient (patient_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 13. STAFF
--- ==========================================
+ 
 CREATE TABLE staff (
     id               INT PRIMARY KEY AUTO_INCREMENT,
     tenant_id        INT          NOT NULL,
@@ -320,9 +317,9 @@ CREATE TABLE staff (
     INDEX idx_status       (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 14. MESSAGES (appointment-based notes/communications)
--- ==========================================
+ 
 CREATE TABLE messages (
     id             INT PRIMARY KEY AUTO_INCREMENT,
     tenant_id      INT       NOT NULL,
@@ -338,9 +335,9 @@ CREATE TABLE messages (
     INDEX idx_sender      (sender_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 15. MEDICAL RECORDS
--- ==========================================
+ 
 CREATE TABLE medical_records (
     id              INT PRIMARY KEY AUTO_INCREMENT,
     tenant_id       INT          NOT NULL,
@@ -365,9 +362,9 @@ CREATE TABLE medical_records (
     INDEX idx_doctor        (doctor_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ==========================================
+ 
 -- 16. AUDIT LOGS
--- ==========================================
+ 
 CREATE TABLE audit_logs (
     id            INT PRIMARY KEY AUTO_INCREMENT,
     tenant_id     INT          NOT NULL,
@@ -391,9 +388,9 @@ CREATE TABLE audit_logs (
     INDEX idx_action_status (action, status),
     INDEX idx_created_at    (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- ==========================================
+ 
 -- 17. SESSION
--- ==========================================
+ 
 
 CREATE TABLE sessions (
     id         INT PRIMARY KEY AUTO_INCREMENT,
@@ -410,9 +407,9 @@ CREATE TABLE sessions (
     INDEX idx_user    (user_id),
     INDEX idx_expires (expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- ==========================================
+ 
 -- Found Bugs Alter This
--- ==========================================
+ 
 -- MANDATORY: Fix unique constraint for encrypted email
 ALTER TABLE users DROP INDEX unique_email_per_tenant;
 ALTER TABLE users DROP INDEX idx_email;
@@ -437,9 +434,9 @@ ALTER TABLE patients
     MODIFY medical_notes           TEXT,
     MODIFY emergency_contact_name  VARCHAR(500) NULL,
     MODIFY emergency_contact_phone VARCHAR(500) NULL;
--- ==========================================
+ 
 -- SEED DATA
--- ==========================================
+ 
 
 -- Permissions
 INSERT INTO permissions (name, slug, module, description) VALUES
