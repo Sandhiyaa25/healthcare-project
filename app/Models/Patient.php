@@ -33,10 +33,14 @@ class Patient
         $where  = ['tenant_id = ?', 'deleted_at IS NULL'];
         $params = [$tenantId];
 
-        if (!empty($filters['search'])) {
-            $s       = '%' . $filters['search'] . '%';
-            $where[] = '(first_name LIKE ? OR last_name LIKE ? OR email LIKE ? OR phone LIKE ?)';
-            $params  = array_merge($params, [$s, $s, $s, $s]);
+        if (!empty($filters['search_blind_index'])) {
+            // Encrypted columns cannot use LIKE — use blind index equality check
+            $where[] = '(first_name_blind_index = ? OR last_name_blind_index = ? OR email_blind_index = ?)';
+            $params  = array_merge($params, [
+                $filters['search_blind_index'],
+                $filters['search_blind_index'],
+                $filters['search_blind_index'],
+            ]);
         }
 
         if (!empty($filters['status'])) {

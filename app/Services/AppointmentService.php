@@ -4,21 +4,26 @@ namespace App\Services;
 
 use App\Models\Appointment;
 use App\Models\Patient;
+use App\Models\User;
 use App\Models\AuditLog;
 use App\Validators\AppointmentValidator;
 use App\Exceptions\ValidationException;
 
 class AppointmentService
 {
-    private Appointment $appointmentModel;
-    private Patient     $patientModel;
-    private AuditLog    $auditLog;
+    private Appointment       $appointmentModel;
+    private Patient           $patientModel;
+    private User              $userModel;
+    private AuditLog          $auditLog;
+    private EncryptionService $encryption;
 
     public function __construct()
     {
         $this->appointmentModel = new Appointment();
         $this->patientModel     = new Patient();
+        $this->userModel        = new User();
         $this->auditLog         = new AuditLog();
+        $this->encryption       = new EncryptionService();
     }
 
     public function getAll(int $tenantId, array $filters, int $page, int $perPage): array
@@ -59,10 +64,24 @@ class AppointmentService
     private function decryptAppointment(?array $appt): array
     {
         if (!$appt) return [];
-        $enc = new EncryptionService();
+
+        // Decrypt appointment notes
         if (!empty($appt['notes'])) {
-            $appt['notes'] = $enc->decryptField($appt['notes']);
+            $appt['notes'] = $this->encryption->decryptField($appt['notes']);
         }
+
+        // Decrypt and assemble patient_name from individual encrypted columns
+        $pf = $this->encryption->decryptField($appt['patient_first_name'] ?? null) ?? '';
+        $pl = $this->encryption->decryptField($appt['patient_last_name']  ?? null) ?? '';
+        $appt['patient_name'] = trim($pf . ' ' . $pl);
+        unset($appt['patient_first_name'], $appt['patient_last_name']);
+
+        // Decrypt and assemble doctor_name
+        $df = $this->encryption->decryptField($appt['doctor_first_name'] ?? null) ?? '';
+        $dl = $this->encryption->decryptField($appt['doctor_last_name']  ?? null) ?? '';
+        $appt['doctor_name'] = trim($df . ' ' . $dl);
+        unset($appt['doctor_first_name'], $appt['doctor_last_name']);
+
         return $appt;
     }
 
@@ -80,6 +99,12 @@ class AppointmentService
             throw new ValidationException('Patient not found in this tenant');
         }
 
+        // Verify doctor belongs to tenant (Bug 6)
+        $doctor = $this->userModel->findById((int) $data['doctor_id'], $tenantId);
+        if (!$doctor) {
+            throw new ValidationException('Doctor not found in this tenant');
+        }
+
         // Check for time conflict
         $conflict = $this->appointmentModel->checkConflict(
             (int) $data['doctor_id'],
@@ -92,10 +117,9 @@ class AppointmentService
             throw new ValidationException('Doctor already has an appointment in this time slot');
         }
 
-        // Encrypt notes before storing
+        // Encrypt notes before storing (Bug 8: use shared $this->encryption)
         if (!empty($data['notes'])) {
-            $enc        = new \App\Services\EncryptionService();
-            $data['notes'] = $enc->encryptField($data['notes']);
+            $data['notes'] = $this->encryption->encryptField($data['notes']);
         }
 
         $apptId = $this->appointmentModel->create(array_merge($data, ['tenant_id' => $tenantId]));
@@ -166,6 +190,10 @@ class AppointmentService
             throw new ValidationException('Appointment not found');
         }
 
+        if ($appt['status'] === 'cancelled') {
+            throw new ValidationException('Appointment is already cancelled');
+        }
+
         if ($appt['status'] === 'completed') {
             throw new ValidationException('Cannot cancel a completed appointment');
         }
@@ -208,7 +236,11 @@ class AppointmentService
             throw new ValidationException('No patient profile linked to your account');
         }
         $filters['patient_id'] = $patient['id'];
-        return $this->appointmentModel->getAll($tenantId, $filters, $page, $perPage);
+        $results = $this->appointmentModel->getAll($tenantId, $filters, $page, $perPage);
+        if (empty($results)) {
+            return ['appointments' => [], 'message' => 'No appointments found for your account'];
+        }
+        return ['appointments' => array_map([$this, 'decryptAppointment'], $results)];
     }
 
     /**
@@ -220,7 +252,11 @@ class AppointmentService
         if (!$patient) {
             throw new ValidationException('No patient profile linked to your account');
         }
-        return $this->appointmentModel->getByDateRange($tenantId, $startDate, $endDate, null, $patient['id']);
+        $results = $this->appointmentModel->getByDateRange($tenantId, $startDate, $endDate, null, $patient['id']);
+        if (empty($results)) {
+            return ['appointments' => [], 'message' => 'No upcoming appointments found for your account'];
+        }
+        return ['appointments' => array_map([$this, 'decryptAppointment'], $results)];
     }
 
     /**

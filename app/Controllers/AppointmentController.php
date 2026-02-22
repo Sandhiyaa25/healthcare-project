@@ -157,8 +157,9 @@ class AppointmentController
         $apptId   = (int) $request->param('id');
         $role     = $request->getAttribute('auth_role');
 
-        if ($role === 'patient') {
-            Response::forbidden('Patients cannot update appointment status', 'FORBIDDEN');
+        // Bug 14: only clinical staff may update status; block patient, pharmacist, receptionist
+        if (!in_array($role, ['admin', 'doctor', 'nurse'])) {
+            Response::forbidden('Only admin, doctor, and nurse can update appointment status', 'FORBIDDEN');
         }
 
         $status = $request->input('status');

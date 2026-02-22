@@ -17,7 +17,7 @@ class Invoice
     public function findById(int $id, int $tenantId): ?array
     {
         $stmt = $this->db->prepare("
-            SELECT i.*, CONCAT(p.first_name, ' ', p.last_name) AS patient_name
+            SELECT i.*, p.first_name AS patient_first_name, p.last_name AS patient_last_name
             FROM invoices i LEFT JOIN patients p ON p.id = i.patient_id
             WHERE i.id = ? AND i.tenant_id = ?
         ");
@@ -40,7 +40,7 @@ class Invoice
         }
 
         $offset = ($page - 1) * $perPage;
-        $sql    = "SELECT i.*, CONCAT(p.first_name, ' ', p.last_name) AS patient_name
+        $sql    = "SELECT i.*, p.first_name AS patient_first_name, p.last_name AS patient_last_name
                    FROM invoices i LEFT JOIN patients p ON p.id = i.patient_id
                    WHERE " . implode(' AND ', $where) . " ORDER BY i.created_at DESC LIMIT :limit OFFSET :offset";
 

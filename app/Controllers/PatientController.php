@@ -81,15 +81,15 @@ class PatientController
         $role       = $request->getAttribute('auth_role');
         $authUserId = (int) $request->getAttribute('auth_user_id');
 
-        $patient = $this->patientService->getById($patientId, $tenantId);
-
-        // Patient can only view their own record
+        // Bug 10: For patient role, check ownership BEFORE fetching (no decrypt-then-discard of PHI)
         if ($role === 'patient') {
-            if ((int)($patient['user_id'] ?? 0) !== $authUserId) {
+            $ownRecord = $this->patientService->getByUserId($authUserId, $tenantId);
+            if (!$ownRecord || (int)($ownRecord['id'] ?? 0) !== $patientId) {
                 Response::forbidden('You can only view your own record', 'FORBIDDEN');
             }
         }
 
+        $patient = $this->patientService->getById($patientId, $tenantId);
         Response::success($patient, 'Patient retrieved');
     }
 
@@ -124,8 +124,9 @@ class PatientController
         $patientId = (int) $request->param('id');
         $role      = $request->getAttribute('auth_role');
 
-        if ($role === 'patient') {
-            Response::forbidden('Use PUT /api/patients/me to update your own profile', 'FORBIDDEN');
+        // Bug 11: allowlist — pharmacist (and any other non-clinical role) cannot update patient records
+        if (!in_array($role, ['admin', 'doctor', 'nurse', 'receptionist'])) {
+            Response::forbidden('You do not have permission to update patient records', 'FORBIDDEN');
         }
 
         $patient = $this->patientService->update(
