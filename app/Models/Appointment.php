@@ -17,9 +17,9 @@ class Appointment
     public function findById(int $id, int $tenantId): ?array
     {
         $stmt = $this->db->prepare("
-            SELECT a.*, 
-                CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
-                CONCAT(u.first_name, ' ', u.last_name) AS doctor_name
+            SELECT a.*,
+                p.first_name AS patient_first_name, p.last_name AS patient_last_name,
+                u.first_name AS doctor_first_name,  u.last_name AS doctor_last_name
             FROM appointments a
             LEFT JOIN patients p ON p.id = a.patient_id
             LEFT JOIN users u ON u.id = a.doctor_id
@@ -60,8 +60,9 @@ class Appointment
         }
 
         $offset = ($page - 1) * $perPage;
-        $sql    = "SELECT a.*, CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
-                    CONCAT(u.first_name, ' ', u.last_name) AS doctor_name
+        $sql    = "SELECT a.*,
+                    p.first_name AS patient_first_name, p.last_name AS patient_last_name,
+                    u.first_name AS doctor_first_name,  u.last_name AS doctor_last_name
                    FROM appointments a
                    LEFT JOIN patients p ON p.id = a.patient_id
                    LEFT JOIN users u ON u.id = a.doctor_id
@@ -156,8 +157,9 @@ class Appointment
             $params[':patient_id'] = $patientId;
         }
 
-        $sql = "SELECT a.*, CONCAT(p.first_name, ' ', p.last_name) AS patient_name,
-                    CONCAT(u.first_name, ' ', u.last_name) AS doctor_name
+        $sql = "SELECT a.*,
+                    p.first_name AS patient_first_name, p.last_name AS patient_last_name,
+                    u.first_name AS doctor_first_name,  u.last_name AS doctor_last_name
                 FROM appointments a
                 LEFT JOIN patients p ON p.id = a.patient_id
                 LEFT JOIN users u ON u.id = a.doctor_id

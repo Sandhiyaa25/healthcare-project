@@ -96,7 +96,6 @@ $pharmacistId, string $ip, string $userAgent): array
  return $this->getById($id, $tenantId);
  }
  // ─── AES helpers
-─────────────────────────────────────────────────
  private function encryptFields(array $data): array
  {
  // Encrypt text fields

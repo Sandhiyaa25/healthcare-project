@@ -29,6 +29,12 @@ private const ENCRYPTED_FIELDS = [
 
     public function getAll(int $tenantId, array $filters, int $page, int $perPage): array
     {
+        // Convert search term to blind index before passing to model
+        // (columns are AES-encrypted; LIKE on ciphertext never matches)
+        if (!empty($filters['search'])) {
+            $filters['search_blind_index'] = $this->encryption->blindIndex($filters['search']);
+        }
+
         $patients = $this->patientModel->getAll($tenantId, $filters, $page, $perPage);
 
         if (empty($patients)) {

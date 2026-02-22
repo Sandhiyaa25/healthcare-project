@@ -98,27 +98,37 @@ class RegisterService
 
             $db->commit();
 
-            $this->auditLog->log([
-                'tenant_id'    => $tenantId,
-                'user_id'      => $adminUserId,
-                'action'       => 'TENANT_REGISTERED',
-                'severity'     => 'info',
-                'resource_type'=> 'tenant',
-                'resource_id'  => $tenantId,
-                'ip_address'   => $ip,
-                'user_agent'   => $userAgent,
-                'new_values'   => ['hospital_name' => $data['hospital_name'], 'subdomain' => $data['subdomain']],
-            ]);
-
             return [
-                'tenant_id' => $tenantId,
-                'message'   => 'Registration successful. Your account is pending approval.',
-                'subdomain' => $data['subdomain'],
+                'tenant_id'   => $tenantId,
+                'admin_user_id' => $adminUserId,
+                'subdomain'   => $data['subdomain'],
+                'hospital_name' => $data['hospital_name'],
             ];
 
         } catch (\Throwable $e) {
-            $db->rollBack();
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
             throw $e;
         }
+
+        // AuditLog is outside the transaction — safe from rollBack issues
+        $this->auditLog->log([
+            'tenant_id'    => $result['tenant_id'],
+            'user_id'      => $result['admin_user_id'],
+            'action'       => 'TENANT_REGISTERED',
+            'severity'     => 'info',
+            'resource_type'=> 'tenant',
+            'resource_id'  => $result['tenant_id'],
+            'ip_address'   => $ip,
+            'user_agent'   => $userAgent,
+            'new_values'   => ['hospital_name' => $result['hospital_name'], 'subdomain' => $result['subdomain']],
+        ]);
+
+        return [
+            'tenant_id' => $result['tenant_id'],
+            'message'   => 'Registration successful. Your account is pending approval.',
+            'subdomain' => $result['subdomain'],
+        ];
     }
 }
