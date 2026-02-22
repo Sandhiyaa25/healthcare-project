@@ -104,8 +104,7 @@ $this->auditLog->log([
 ]);
 return $this->getById($id, $tenantId);
 }
-// ─── AES helpers
-─────────────────────────────────────────────────
+// ─── AES helpers ───────────────────────────────
 private function encryptFields(array $data): array
 {
 // Encrypt text fields
