@@ -85,7 +85,7 @@ private const ENCRYPTED_FIELDS = [
 
         $patientId = $this->patientModel->create(array_merge($encrypted, [
             'tenant_id'              => $tenantId,
-            'user_id'                => $data['user_id'] ?? null,
+            'user_id'                => !empty($data['user_id']) ? (int) $data['user_id'] : null,
             'blood_group'            => $data['blood_group'] ?? null,
             'gender'                 => $data['gender'] ?? null,
             'status'                 => $data['status'] ?? 'active',
