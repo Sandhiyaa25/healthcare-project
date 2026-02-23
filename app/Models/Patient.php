@@ -135,6 +135,14 @@ class Patient
         ]);
     }
 
+    public function linkUser(int $patientId, int $userId, int $tenantId): bool
+    {
+        $stmt = $this->db->prepare(
+            "UPDATE patients SET user_id = ? WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL"
+        );
+        return $stmt->execute([$userId, $patientId, $tenantId]) && $stmt->rowCount() > 0;
+    }
+
     public function softDelete(int $id, int $tenantId): bool
     {
         $stmt = $this->db->prepare("UPDATE patients SET deleted_at = NOW() WHERE id = ? AND tenant_id = ?");

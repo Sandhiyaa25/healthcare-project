@@ -47,6 +47,11 @@ class PatientController
      */
     public function myProfile(Request $request): void
     {
+        $role = $request->getAttribute('auth_role');
+        if ($role !== 'patient') {
+            Response::forbidden('This endpoint is for patients only. Use GET /api/patients/{id}', 'FORBIDDEN');
+        }
+
         $tenantId   = (int) $request->getAttribute('auth_tenant_id');
         $authUserId = (int) $request->getAttribute('auth_user_id');
 
@@ -60,6 +65,11 @@ class PatientController
      */
     public function updateMyProfile(Request $request): void
     {
+        $role = $request->getAttribute('auth_role');
+        if ($role !== 'patient') {
+            Response::forbidden('This endpoint is for patients only. Use PUT /api/patients/{id}', 'FORBIDDEN');
+        }
+
         $tenantId   = (int) $request->getAttribute('auth_tenant_id');
         $authUserId = (int) $request->getAttribute('auth_user_id');
 

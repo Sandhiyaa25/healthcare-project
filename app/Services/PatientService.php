@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Patient;
+use App\Models\User;
 use App\Models\AuditLog;
 use App\Validators\PatientValidator;
 use App\Exceptions\ValidationException;
@@ -10,6 +11,7 @@ use App\Exceptions\ValidationException;
 class PatientService
 {
     private Patient           $patientModel;
+    private User              $userModel;
     private AuditLog          $auditLog;
     private EncryptionService $encryption;
 
@@ -23,6 +25,7 @@ private const ENCRYPTED_FIELDS = [
     public function __construct()
     {
         $this->patientModel = new Patient();
+        $this->userModel    = new User();
         $this->auditLog     = new AuditLog();
         $this->encryption   = new EncryptionService();
     }
@@ -68,6 +71,14 @@ private const ENCRYPTED_FIELDS = [
         $fnBlind    = $this->encryption->blindIndex($data['first_name']);
         $lnBlind    = $this->encryption->blindIndex($data['last_name']);
         $emailBlind = !empty($data['email']) ? $this->encryption->blindIndex($data['email']) : null;
+
+        // Auto-link user account: if user_id not provided, find user by email blind index
+        if (empty($data['user_id']) && $emailBlind !== null) {
+            $linkedUser = $this->userModel->findByEmailBlindIndex($emailBlind, $tenantId);
+            if ($linkedUser && ($linkedUser['role_slug'] ?? '') === 'patient') {
+                $data['user_id'] = $linkedUser['id'];
+            }
+        }
 
         // Encrypt sensitive fields
         $encrypted = $this->encryptFields($data);
@@ -133,6 +144,11 @@ private const ENCRYPTED_FIELDS = [
         ]);
 
         $this->patientModel->update($id, $tenantId, $updateData);
+
+        // If admin explicitly passes user_id to link/repair the account association
+        if (!empty($data['user_id'])) {
+            $this->patientModel->linkUser($id, (int) $data['user_id'], $tenantId);
+        }
 
         $this->auditLog->log([
             'tenant_id'    => $tenantId,
