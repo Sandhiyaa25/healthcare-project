@@ -142,6 +142,27 @@ class Appointment
         return (bool) $stmt->fetch();
     }
 
+    public function checkPatientConflict(int $patientId, int $tenantId, string $date, string $startTime, string $endTime, ?int $excludeId = null): bool
+    {
+        $sql = "SELECT id FROM appointments
+                WHERE patient_id = ? AND tenant_id = ? AND appointment_date = ?
+                  AND status NOT IN ('cancelled')
+                  AND (
+                        (start_time < ? AND end_time > ?)
+                     OR (start_time >= ? AND start_time < ?)
+                  )";
+        $params = [$patientId, $tenantId, $date, $endTime, $startTime, $startTime, $endTime];
+
+        if ($excludeId) {
+            $sql     .= ' AND id != ?';
+            $params[] = $excludeId;
+        }
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return (bool) $stmt->fetch();
+    }
+
     public function getByDateRange(int $tenantId, string $startDate, string $endDate, ?int $doctorId = null, ?int $patientId = null): array
     {
         $where  = ['a.tenant_id = :tenant_id', 'a.appointment_date BETWEEN :start AND :end'];

@@ -60,6 +60,31 @@ class AppointmentService
         return $this->decryptAppointment($appt);
     }
 
+    /**
+     * For patient role — checks ownership on the raw (unencrypted) record BEFORE
+     * decrypting any PHI. Prevents PHI being loaded into memory for records the
+     * patient does not own.
+     */
+    public function getByIdForPatient(int $id, int $tenantId, int $userId): array
+    {
+        $appt = $this->appointmentModel->findById($id, $tenantId);
+        if (!$appt) {
+            $exists = $this->appointmentModel->findByIdOnly($id);
+            if ($exists) {
+                throw new ValidationException('This appointment does not belong to your tenant');
+            }
+            throw new ValidationException('Appointment not found');
+        }
+
+        // Ownership check on raw record — patient_id is not encrypted
+        $patient = $this->patientModel->findByUserId($userId, $tenantId);
+        if (!$patient || (int) $appt['patient_id'] !== (int) $patient['id']) {
+            throw new ValidationException('You can only access your own appointments');
+        }
+
+        return $this->decryptAppointment($appt);
+    }
+
     // ─── decrypt helper ─────────────────────────────────────────────
     private function decryptAppointment(?array $appt): array
     {
@@ -105,7 +130,7 @@ class AppointmentService
             throw new ValidationException('Doctor not found in this tenant');
         }
 
-        // Check for time conflict
+        // Check for doctor time conflict
         $conflict = $this->appointmentModel->checkConflict(
             (int) $data['doctor_id'],
             $tenantId,
@@ -115,6 +140,18 @@ class AppointmentService
         );
         if ($conflict) {
             throw new ValidationException('Doctor already has an appointment in this time slot');
+        }
+
+        // Check for patient time conflict — same patient cannot be booked with two doctors at the same time
+        $patientConflict = $this->appointmentModel->checkPatientConflict(
+            (int) $data['patient_id'],
+            $tenantId,
+            $data['appointment_date'],
+            $data['start_time'],
+            $data['end_time']
+        );
+        if ($patientConflict) {
+            throw new ValidationException('Patient already has an appointment in this time slot');
         }
 
         // Encrypt notes before storing (Bug 8: use shared $this->encryption)
@@ -151,12 +188,24 @@ class AppointmentService
             throw new ValidationException('Validation failed', $errors);
         }
 
-        // Re-check conflict excluding self
+        // If doctor_id is being changed, verify the new doctor belongs to the tenant
+        if (isset($data['doctor_id']) && (int) $data['doctor_id'] !== (int) $appt['doctor_id']) {
+            $newDoctor = $this->userModel->findById((int) $data['doctor_id'], $tenantId);
+            if (!$newDoctor) {
+                throw new ValidationException('Doctor not found in this tenant');
+            }
+        }
+
+        // Re-check conflicts excluding self
         if (!empty($data['start_time']) && !empty($data['end_time'])) {
+            $dateToCheck    = $data['appointment_date'] ?? $appt['appointment_date'];
+            // Use new doctor_id if provided, otherwise keep existing
+            $doctorIdToCheck = isset($data['doctor_id']) ? (int) $data['doctor_id'] : (int) $appt['doctor_id'];
+
             $conflict = $this->appointmentModel->checkConflict(
-                (int) $appt['doctor_id'],
+                $doctorIdToCheck,
                 $tenantId,
-                $data['appointment_date'] ?? $appt['appointment_date'],
+                $dateToCheck,
                 $data['start_time'],
                 $data['end_time'],
                 $id
@@ -164,6 +213,26 @@ class AppointmentService
             if ($conflict) {
                 throw new ValidationException('Doctor already has an appointment in this time slot');
             }
+
+            // Check patient is not already booked at the same time with a different doctor
+            $patientConflict = $this->appointmentModel->checkPatientConflict(
+                (int) $appt['patient_id'],
+                $tenantId,
+                $dateToCheck,
+                $data['start_time'],
+                $data['end_time'],
+                $id
+            );
+            if ($patientConflict) {
+                throw new ValidationException('Patient already has an appointment in this time slot');
+            }
+        }
+
+        // Encrypt notes if provided in the update payload before merging
+        if (array_key_exists('notes', $data)) {
+            $data['notes'] = ($data['notes'] !== null && $data['notes'] !== '')
+                ? $this->encryption->encryptField($data['notes'])
+                : null;
         }
 
         $updateData = array_merge($appt, $data);

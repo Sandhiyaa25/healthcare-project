@@ -66,11 +66,11 @@ class AppointmentController
         $role     = $request->getAttribute('auth_role');
         $userId   = (int) $request->getAttribute('auth_user_id');
 
-        $appt = $this->appointmentService->getById($apptId, $tenantId);
-
-        // Patient can only view their own appointment
+        // Patient: ownership is checked BEFORE decrypting PHI
         if ($role === 'patient') {
-            $this->appointmentService->assertPatientOwnsAppointment($appt, $userId, $tenantId);
+            $appt = $this->appointmentService->getByIdForPatient($apptId, $tenantId, $userId);
+        } else {
+            $appt = $this->appointmentService->getById($apptId, $tenantId);
         }
 
         Response::success($appt, 'Appointment retrieved');
@@ -114,6 +114,14 @@ class AppointmentController
 
         if ($role === 'patient') {
             Response::forbidden('Patients cannot modify appointment details. Use PATCH /api/appointments/{id}/cancel to cancel.', 'FORBIDDEN');
+        }
+
+        // Doctor can only update their own appointments
+        if ($role === 'doctor') {
+            $existing = $this->appointmentService->getById($apptId, $tenantId);
+            if ((int) $existing['doctor_id'] !== $userId) {
+                Response::forbidden('You can only update your own appointments', 'FORBIDDEN');
+            }
         }
 
         $appt = $this->appointmentService->update(
@@ -162,7 +170,12 @@ class AppointmentController
             Response::forbidden('Only admin, doctor, and nurse can update appointment status', 'FORBIDDEN');
         }
 
-        $status = $request->input('status');
+        $status = trim((string) ($request->input('status') ?? ''));
+        if ($status === '') {
+            Response::error(['status' => 'Status field is required'], 422);
+            return;
+        }
+
         $appt   = $this->appointmentService->updateStatus(
             $apptId, $status, $tenantId, $userId, $request->ip(), $request->userAgent()
         );
