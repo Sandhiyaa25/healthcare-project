@@ -490,12 +490,10 @@ Modular architecture
 Developer Information
 
 Developer
-Sandhiya N
-Gokul D
+Sandhiya N,
+Gokul D,
 Mohammed Sauban Samith P
 
 Project Type
  Healthcare Application Backend – MVP
 
-Architecture
-Clean Architecture
