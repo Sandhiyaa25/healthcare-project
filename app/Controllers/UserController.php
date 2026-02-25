@@ -19,7 +19,7 @@ class UserController
     {
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
         $page     = (int) $request->query('page', 1);
-        $perPage  = (int) $request->query('per_page', 20);
+        $perPage  = min(max((int) $request->query('per_page', 20), 1), 100);
         $filters  = [
             'role_id' => $request->query('role_id'),
             'status'  => $request->query('status'),
@@ -28,6 +28,19 @@ class UserController
 
         $users = $this->userService->getAll($tenantId, $filters, $page, $perPage);
         Response::success($users, 'Users retrieved');
+    }
+
+    /**
+     * GET /api/users/me
+     * Any authenticated user — returns their own profile.
+     */
+    public function me(Request $request): void
+    {
+        $userId   = (int) $request->getAttribute('auth_user_id');
+        $tenantId = (int) $request->getAttribute('auth_tenant_id');
+
+        $user = $this->userService->getById($userId, $tenantId);
+        Response::success($user, 'Profile retrieved');
     }
 
     public function show(Request $request): void

@@ -15,6 +15,18 @@ class MessageController
         $this->messageService = new MessageService();
     }
 
+    public function inbox(Request $request): void
+    {
+        $tenantId = (int) $request->getAttribute('auth_tenant_id');
+        $userId   = (int) $request->getAttribute('auth_user_id');
+        $role     = $request->getAttribute('auth_role');
+        $page     = (int) $request->query('page', 1);
+        $perPage  = min(max((int) $request->query('per_page', 20), 1), 100);
+
+        $messages = $this->messageService->getInbox($userId, $role, $tenantId, $page, $perPage);
+        Response::success($messages, 'Messages retrieved');
+    }
+
     public function getByAppointment(Request $request): void
     {
         $tenantId      = (int) $request->getAttribute('auth_tenant_id');

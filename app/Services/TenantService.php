@@ -5,22 +5,22 @@ namespace App\Services;
 use App\Models\Tenant;
 use App\Models\Role;
 use App\Models\User;
-use App\Models\AuditLog;
+use App\Models\RefreshToken;
 use App\Exceptions\ValidationException;
 
 class TenantService
 {
-    private Tenant    $tenantModel;
-    private Role      $roleModel;
-    private AuditLog  $auditLog;
+    private Tenant       $tenantModel;
+    private Role         $roleModel;
+    private RefreshToken $refreshTokenModel;
     private EncryptionService $encryption;
 
     public function __construct()
     {
-        $this->tenantModel = new Tenant();
-        $this->roleModel   = new Role();
-        $this->auditLog    = new AuditLog();
-        $this->encryption  = new EncryptionService();
+        $this->tenantModel       = new Tenant();
+        $this->roleModel         = new Role();
+        $this->refreshTokenModel = new RefreshToken();
+        $this->encryption        = new EncryptionService();
     }
 
     public function getAll(int $page, int $perPage, ?string $status = null): array
@@ -48,18 +48,7 @@ class TenantService
 
         $this->tenantModel->updateStatus($id, 'active');
 
-        $this->auditLog->log([
-            'tenant_id'    => $id,
-            'user_id'      => $adminId,
-            'action'       => 'TENANT_APPROVED',
-            'severity'     => 'info',
-            'resource_type'=> 'tenant',
-            'resource_id'  => $id,
-            'old_values'   => ['status' => $tenant['status']],
-            'new_values'   => ['status' => 'active'],
-        ]);
-
-        return $this->tenantModel->findById($id);
+        return $this->decryptTenant($this->tenantModel->findById($id));
     }
 
     public function suspend(int $id, int $adminId): void
@@ -75,16 +64,9 @@ class TenantService
 
         $this->tenantModel->updateStatus($id, 'suspended');
 
-        $this->auditLog->log([
-            'tenant_id'    => $id,
-            'user_id'      => $adminId,
-            'action'       => 'TENANT_SUSPENDED',
-            'severity'     => 'warning',
-            'resource_type'=> 'tenant',
-            'resource_id'  => $id,
-            'old_values'   => ['status' => $tenant['status']],
-            'new_values'   => ['status' => 'suspended'],
-        ]);
+        // Immediately revoke all refresh tokens for this tenant so suspended
+        // users cannot obtain new access tokens after the current one expires.
+        $this->refreshTokenModel->revokeAllForTenant($id);
     }
 
     public function reactivate(int $id, int $adminId): array
@@ -100,18 +82,55 @@ class TenantService
 
         $this->tenantModel->updateStatus($id, 'active');
 
-        $this->auditLog->log([
-            'tenant_id'    => $id,
-            'user_id'      => $adminId,
-            'action'       => 'TENANT_REACTIVATED',
-            'severity'     => 'info',
-            'resource_type'=> 'tenant',
-            'resource_id'  => $id,
-            'old_values'   => ['status' => $tenant['status']],
-            'new_values'   => ['status' => 'active'],
-        ]);
+        return $this->decryptTenant($this->tenantModel->findById($id));
+    }
 
-        return $this->tenantModel->findById($id);
+    /**
+     * Reset the admin user password for a given tenant.
+     * Connects directly to the tenant DB, finds the active admin, generates a
+     * secure temporary password, hashes it, and forces a password change on next login.
+     */
+    public function resetAdminPassword(int $tenantId, int $platformAdminId): array
+    {
+        $tenant = $this->tenantModel->findById($tenantId);
+        if (!$tenant) {
+            throw new ValidationException('Tenant not found');
+        }
+
+        // Connect to the tenant's isolated database
+        $tenantDb = \Core\Database::getTenant($tenant['db_name']);
+
+        // Find the active admin user in this tenant
+        $stmt = $tenantDb->prepare("
+            SELECT u.id, u.username, u.email
+            FROM users u JOIN roles r ON r.id = u.role_id
+            WHERE r.slug = 'admin' AND u.status = 'active'
+            LIMIT 1
+        ");
+        $stmt->execute();
+        $adminUser = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$adminUser) {
+            throw new ValidationException('No active admin user found in this tenant');
+        }
+
+        // Generate a secure 16-character temporary password
+        $tempPassword = bin2hex(random_bytes(8));
+        $hash         = password_hash($tempPassword, PASSWORD_BCRYPT);
+
+        // Update password and force change on next login
+        $update = $tenantDb->prepare(
+            "UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?"
+        );
+        $update->execute([$hash, $adminUser['id']]);
+
+        return [
+            'tenant_id'      => $tenantId,
+            'tenant_name'    => $tenant['name'] ?? null,
+            'admin_username' => $adminUser['username'],
+            'temp_password'  => $tempPassword,
+            'note'           => 'Admin must change this password on next login.',
+        ];
     }
 
     public function getRoles(int $tenantId): array

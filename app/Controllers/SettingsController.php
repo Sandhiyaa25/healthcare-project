@@ -22,7 +22,7 @@ class SettingsController
     {
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
         $page     = (int) $request->query('page', 1);
-        $perPage  = (int) $request->query('per_page', 50);
+        $perPage  = min(max((int) $request->query('per_page', 50), 1), 100);
         $filters  = [
             'action'   => $request->query('action'),
             'user_id'  => $request->query('user_id'),

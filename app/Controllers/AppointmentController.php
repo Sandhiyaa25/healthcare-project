@@ -28,7 +28,7 @@ class AppointmentController
         $role     = $request->getAttribute('auth_role');
         $userId   = (int) $request->getAttribute('auth_user_id');
         $page     = (int) $request->query('page', 1);
-        $perPage  = (int) $request->query('per_page', 20);
+        $perPage  = min(max((int) $request->query('per_page', 20), 1), 100);
 
         $filters = [
             'status'     => $request->query('status'),
@@ -152,6 +152,27 @@ class AppointmentController
             $apptId, $tenantId, $userId, $request->ip(), $request->userAgent()
         );
         Response::success(null, 'Appointment cancelled');
+    }
+
+    /**
+     * DELETE /api/appointments/{id}
+     * Roles: admin only — removes cancelled or completed appointments.
+     */
+    public function destroy(Request $request): void
+    {
+        $tenantId = (int) $request->getAttribute('auth_tenant_id');
+        $userId   = (int) $request->getAttribute('auth_user_id');
+        $apptId   = (int) $request->param('id');
+        $role     = $request->getAttribute('auth_role');
+
+        if ($role !== 'admin') {
+            Response::forbidden('Only admin can delete appointments', 'FORBIDDEN');
+        }
+
+        $this->appointmentService->delete(
+            $apptId, $tenantId, $userId, $request->ip(), $request->userAgent()
+        );
+        Response::success(null, 'Appointment deleted successfully');
     }
 
     /**

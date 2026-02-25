@@ -25,7 +25,7 @@ class PatientController
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
         $role     = $request->getAttribute('auth_role');
         $page     = (int) $request->query('page', 1);
-        $perPage  = (int) $request->query('per_page', 20);
+        $perPage  = min(max((int) $request->query('per_page', 20), 1), 100);
 
         if ($role === 'patient') {
             Response::forbidden('Patients cannot list all records. Use GET /api/patients/me', 'FORBIDDEN');
@@ -36,9 +36,15 @@ class PatientController
             'status' => $request->query('status'),
         ];
 
-        $result  = $this->patientService->getAll($tenantId, $filters, $page, $perPage);
-        $msg     = $result['message'] ?? 'Patients retrieved';
-        Response::success($result['patients'] ?? $result, $msg);
+        $result = $this->patientService->getAll($tenantId, $filters, $page, $perPage);
+        $msg    = $result['message'] ?? 'Patients retrieved';
+        Response::success([
+            'patients'  => $result['patients'],
+            'total'     => $result['total'],
+            'page'      => $result['page'],
+            'per_page'  => $result['per_page'],
+            'last_page' => $result['last_page'],
+        ], $msg);
     }
 
     /**
@@ -91,12 +97,15 @@ class PatientController
         $role       = $request->getAttribute('auth_role');
         $authUserId = (int) $request->getAttribute('auth_user_id');
 
-        // Bug 10: For patient role, check ownership BEFORE fetching (no decrypt-then-discard of PHI)
+        // Patient role: fetch their own record by user_id, then verify the requested id matches.
+        // This avoids a second DB call — ownRecord is returned directly instead of re-fetching.
         if ($role === 'patient') {
             $ownRecord = $this->patientService->getByUserId($authUserId, $tenantId);
-            if (!$ownRecord || (int)($ownRecord['id'] ?? 0) !== $patientId) {
+            if ((int)($ownRecord['id'] ?? 0) !== $patientId) {
                 Response::forbidden('You can only view your own record', 'FORBIDDEN');
             }
+            Response::success($ownRecord, 'Patient retrieved');
+            return;
         }
 
         $patient = $this->patientService->getById($patientId, $tenantId);

@@ -1,0 +1,16 @@
+# Environment — never commit secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+/logs/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Temp files
+/tmp/
+/storage/

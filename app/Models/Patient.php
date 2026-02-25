@@ -14,27 +14,40 @@ class Patient
         $this->db = Database::getInstance();
     }
 
-    public function findByUserId(int $userId, int $tenantId): ?array
+    // NOTE: $tenantId is intentionally not applied in SQL.
+    // Tenant isolation is enforced at the DB connection level — each tenant
+    // has its own database (set by TenantMiddleware). Adding a WHERE tenant_id
+    // clause here would be redundant and incorrect (the column does not exist).
+
+    public function findByUserId(int $userId, int $tenantId = 0): ?array
     {
-        $stmt = $this->db->prepare("SELECT * FROM patients WHERE user_id = ? AND tenant_id = ? AND deleted_at IS NULL");
-        $stmt->execute([$userId, $tenantId]);
+        $stmt = $this->db->prepare("SELECT * FROM patients WHERE user_id = ? AND deleted_at IS NULL");
+        $stmt->execute([$userId]);
         return $stmt->fetch() ?: null;
     }
 
-    public function findById(int $id, int $tenantId): ?array
+    public function findByEmailBlindIndex(string $blindIndex, int $tenantId = 0): ?array
     {
-        $stmt = $this->db->prepare("SELECT * FROM patients WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL");
-        $stmt->execute([$id, $tenantId]);
+        $stmt = $this->db->prepare(
+            "SELECT * FROM patients WHERE email_blind_index = ? AND deleted_at IS NULL LIMIT 1"
+        );
+        $stmt->execute([$blindIndex]);
         return $stmt->fetch() ?: null;
     }
 
-    public function getAll(int $tenantId, array $filters = [], int $page = 1, int $perPage = 20): array
+    public function findById(int $id, int $tenantId = 0): ?array
     {
-        $where  = ['tenant_id = ?', 'deleted_at IS NULL'];
-        $params = [$tenantId];
+        $stmt = $this->db->prepare("SELECT * FROM patients WHERE id = ? AND deleted_at IS NULL");
+        $stmt->execute([$id]);
+        return $stmt->fetch() ?: null;
+    }
+
+    public function getAll(int $tenantId = 0, array $filters = [], int $page = 1, int $perPage = 20): array
+    {
+        $where  = ['deleted_at IS NULL'];
+        $params = [];
 
         if (!empty($filters['search_blind_index'])) {
-            // Encrypted columns cannot use LIKE — use blind index equality check
             $where[] = '(first_name_blind_index = ? OR last_name_blind_index = ? OR email_blind_index = ?)';
             $params  = array_merge($params, [
                 $filters['search_blind_index'],
@@ -64,18 +77,17 @@ class Patient
     {
         $stmt = $this->db->prepare('
             INSERT INTO patients
-                (tenant_id, user_id, first_name, last_name, date_of_birth, gender, email, phone,
+                (user_id, first_name, last_name, date_of_birth, gender, email, phone,
                  address, blood_group, emergency_contact_name, emergency_contact_phone,
                  allergies, medical_notes, status,
                  first_name_blind_index, last_name_blind_index, email_blind_index)
             VALUES
-                (:tenant_id, :user_id, :first_name, :last_name, :date_of_birth, :gender, :email, :phone,
+                (:user_id, :first_name, :last_name, :date_of_birth, :gender, :email, :phone,
                  :address, :blood_group, :emergency_contact_name, :emergency_contact_phone,
                  :allergies, :medical_notes, :status,
                  :first_name_blind_index, :last_name_blind_index, :email_blind_index)
         ');
         $stmt->execute([
-            ':tenant_id'               => $data['tenant_id'],
             ':user_id'                 => $data['user_id'] ?? null,
             ':first_name'              => $data['first_name'],
             ':last_name'               => $data['last_name'],
@@ -97,7 +109,7 @@ class Patient
         return (int) $this->db->lastInsertId();
     }
 
-    public function update(int $id, int $tenantId, array $data): bool
+    public function update(int $id, int $tenantId = 0, array $data = []): bool
     {
         $stmt = $this->db->prepare('
             UPDATE patients SET
@@ -111,7 +123,7 @@ class Patient
                 first_name_blind_index = :first_name_blind_index,
                 last_name_blind_index  = :last_name_blind_index,
                 email_blind_index      = :email_blind_index
-            WHERE id = :id AND tenant_id = :tenant_id AND deleted_at IS NULL
+            WHERE id = :id AND deleted_at IS NULL
         ');
         return $stmt->execute([
             ':first_name'              => $data['first_name'],
@@ -131,38 +143,55 @@ class Patient
             ':last_name_blind_index'   => $data['last_name_blind_index'] ?? null,
             ':email_blind_index'       => $data['email_blind_index'] ?? null,
             ':id'                      => $id,
-            ':tenant_id'               => $tenantId,
         ]);
     }
 
-    public function linkUser(int $patientId, int $userId, int $tenantId): bool
+    public function linkUser(int $patientId, int $userId, int $tenantId = 0): bool
     {
         $stmt = $this->db->prepare(
-            "UPDATE patients SET user_id = ? WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL"
+            "UPDATE patients SET user_id = ? WHERE id = ? AND deleted_at IS NULL"
         );
-        return $stmt->execute([$userId, $patientId, $tenantId]) && $stmt->rowCount() > 0;
+        return $stmt->execute([$userId, $patientId]) && $stmt->rowCount() > 0;
     }
 
-    public function softDelete(int $id, int $tenantId): bool
+    public function softDelete(int $id, int $tenantId = 0): bool
     {
-        $stmt = $this->db->prepare("UPDATE patients SET deleted_at = NOW() WHERE id = ? AND tenant_id = ?");
-        return $stmt->execute([$id, $tenantId]) && $stmt->rowCount() > 0;
+        $stmt = $this->db->prepare("UPDATE patients SET deleted_at = NOW() WHERE id = ?");
+        return $stmt->execute([$id]) && $stmt->rowCount() > 0;
     }
 
-    public function count(int $tenantId): int
+    public function count(int $tenantId = 0, array $filters = []): int
     {
-        $stmt = $this->db->prepare("SELECT COUNT(*) FROM patients WHERE tenant_id = ? AND deleted_at IS NULL");
-        $stmt->execute([$tenantId]);
+        $where  = ['deleted_at IS NULL'];
+        $params = [];
+
+        if (!empty($filters['search_blind_index'])) {
+            $where[] = '(first_name_blind_index = ? OR last_name_blind_index = ? OR email_blind_index = ?)';
+            $params  = array_merge($params, [
+                $filters['search_blind_index'],
+                $filters['search_blind_index'],
+                $filters['search_blind_index'],
+            ]);
+        }
+
+        if (!empty($filters['status'])) {
+            $where[]  = 'status = ?';
+            $params[] = $filters['status'];
+        }
+
+        $sql  = 'SELECT COUNT(*) FROM patients WHERE ' . implode(' AND ', $where);
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
         return (int) $stmt->fetchColumn();
     }
 
-    public function countByDateRange(int $tenantId, string $startDate, string $endDate): int
+    public function countByDateRange(int $tenantId = 0, string $startDate = '', string $endDate = ''): int
     {
         $stmt = $this->db->prepare("
             SELECT COUNT(*) FROM patients
-            WHERE tenant_id = ? AND DATE(created_at) BETWEEN ? AND ? AND deleted_at IS NULL
+            WHERE DATE(created_at) BETWEEN ? AND ? AND deleted_at IS NULL
         ");
-        $stmt->execute([$tenantId, $startDate, $endDate]);
+        $stmt->execute([$startDate, $endDate]);
         return (int) $stmt->fetchColumn();
     }
 }

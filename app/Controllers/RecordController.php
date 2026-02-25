@@ -20,7 +20,7 @@ class RecordController
         $tenantId  = (int) $request->getAttribute('auth_tenant_id');
         $patientId = (int) $request->param('patient_id');
         $page      = (int) $request->query('page', 1);
-        $perPage   = (int) $request->query('per_page', 20);
+        $perPage   = min(max((int) $request->query('per_page', 20), 1), 100);
 
         $records = $this->recordService->getByPatient($patientId, $tenantId, $page, $perPage);
         Response::success($records, 'Medical records retrieved');
@@ -58,5 +58,22 @@ class RecordController
             $recordId, $request->all(), $tenantId, $userId, $role, $request->ip(), $request->userAgent()
         );
         Response::success($record, 'Medical record updated');
+    }
+
+    /**
+     * PATCH /api/records/{id}/archive
+     * Roles: admin, doctor — soft-archives (HIPAA: records are never hard-deleted).
+     */
+    public function archive(Request $request): void
+    {
+        $tenantId = (int) $request->getAttribute('auth_tenant_id');
+        $userId   = (int) $request->getAttribute('auth_user_id');
+        $role     = $request->getAttribute('auth_role');
+        $recordId = (int) $request->param('id');
+
+        $this->recordService->archive(
+            $recordId, $tenantId, $userId, $role, $request->ip(), $request->userAgent()
+        );
+        Response::success(null, 'Medical record archived');
     }
 }

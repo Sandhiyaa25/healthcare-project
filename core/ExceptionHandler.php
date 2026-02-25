@@ -4,6 +4,7 @@ namespace Core;
 
 use App\Exceptions\AuthException;
 use App\Exceptions\DatabaseException;
+use App\Exceptions\NotFoundException;
 use App\Exceptions\TenantException;
 use App\Exceptions\ValidationException;
 
@@ -21,6 +22,11 @@ class ExceptionHandler
 
         if ($e instanceof ValidationException) {
             Response::validationError($e->getMessage(), $e->getErrors());
+            return;
+        }
+
+        if ($e instanceof NotFoundException) {
+            Response::notFound($e->getMessage());
             return;
         }
 

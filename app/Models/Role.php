@@ -14,35 +14,34 @@ class Role
         $this->db = Database::getInstance();
     }
 
-    public function findById(int $id, int $tenantId): ?array
+    public function findById(int $id, int $tenantId = 0): ?array
     {
-        $stmt = $this->db->prepare('SELECT * FROM roles WHERE id = ? AND tenant_id = ?');
-        $stmt->execute([$id, $tenantId]);
+        $stmt = $this->db->prepare('SELECT * FROM roles WHERE id = ?');
+        $stmt->execute([$id]);
         return $stmt->fetch() ?: null;
     }
 
-    public function findBySlug(string $slug, int $tenantId): ?array
+    public function findBySlug(string $slug, int $tenantId = 0): ?array
     {
-        $stmt = $this->db->prepare('SELECT * FROM roles WHERE slug = ? AND tenant_id = ?');
-        $stmt->execute([$slug, $tenantId]);
+        $stmt = $this->db->prepare('SELECT * FROM roles WHERE slug = ?');
+        $stmt->execute([$slug]);
         return $stmt->fetch() ?: null;
     }
 
-    public function getAllByTenant(int $tenantId): array
+    public function getAllByTenant(int $tenantId = 0): array
     {
-        $stmt = $this->db->prepare('SELECT * FROM roles WHERE tenant_id = ? ORDER BY name ASC');
-        $stmt->execute([$tenantId]);
+        $stmt = $this->db->prepare('SELECT * FROM roles ORDER BY name ASC');
+        $stmt->execute();
         return $stmt->fetchAll();
     }
 
-    public function create(int $tenantId, array $data): int
+    public function create(int $tenantId = 0, array $data = []): int
     {
         $stmt = $this->db->prepare('
-            INSERT INTO roles (tenant_id, name, slug, description, is_system_role)
-            VALUES (:tenant_id, :name, :slug, :description, :is_system_role)
+            INSERT INTO roles (name, slug, description, is_system_role)
+            VALUES (:name, :slug, :description, :is_system_role)
         ');
         $stmt->execute([
-            ':tenant_id'     => $tenantId,
             ':name'          => $data['name'],
             ':slug'          => $data['slug'],
             ':description'   => $data['description'] ?? null,

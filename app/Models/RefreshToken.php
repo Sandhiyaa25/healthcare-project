@@ -11,7 +11,8 @@ class RefreshToken
 
     public function __construct()
     {
-        $this->db = Database::getInstance();
+        // Refresh tokens live in master DB for cross-tenant auth routing
+        $this->db = Database::getMaster();
     }
 
     public function create(array $data): int
@@ -54,6 +55,15 @@ class RefreshToken
             WHERE user_id = ? AND tenant_id = ? AND revoked = FALSE
         ");
         $stmt->execute([$userId, $tenantId]);
+    }
+
+    public function revokeAllForTenant(int $tenantId): void
+    {
+        $stmt = $this->db->prepare("
+            UPDATE refresh_tokens SET revoked = TRUE, revoked_at = NOW()
+            WHERE tenant_id = ? AND revoked = FALSE
+        ");
+        $stmt->execute([$tenantId]);
     }
 
     public function deleteExpired(): void

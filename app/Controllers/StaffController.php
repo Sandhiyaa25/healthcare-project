@@ -15,13 +15,23 @@ class StaffController
         $this->staffService = new StaffService();
     }
 
+    // GET — authenticated user views their own staff profile
+    public function me(Request $request): void
+    {
+        $userId   = (int) $request->getAttribute('auth_user_id');
+        $tenantId = (int) $request->getAttribute('auth_tenant_id');
+
+        $staff = $this->staffService->getByUserId($userId, $tenantId);
+        Response::success($staff, 'Staff profile retrieved');
+    }
+
     // GET — all roles can view staff list (tenant-scoped)
     public function index(Request $request): void
     {
         $tenantId = (int) $request->getAttribute('auth_tenant_id');
         $filters  = ['role_id' => $request->query('role_id'), 'status' => $request->query('status')];
         $page     = (int) $request->query('page', 1);
-        $perPage  = (int) $request->query('per_page', 20);
+        $perPage  = min(max((int) $request->query('per_page', 20), 1), 100);
 
         $result = $this->staffService->getAll($tenantId, $filters, $page, $perPage);
         $msg    = $result['message'] ?? 'Staff retrieved';

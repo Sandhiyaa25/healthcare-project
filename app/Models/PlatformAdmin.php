@@ -11,7 +11,7 @@ class PlatformAdmin
 
     public function __construct()
     {
-        $this->db = Database::getInstance();
+        $this->db = Database::getMaster();
     }
 
     public function findById(int $id): ?array

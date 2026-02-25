@@ -17,8 +17,9 @@ class BillingService
     private EncryptionService $encryption;
 
     // Encrypt notes on invoices; reference_number on payments
-    private const INVOICE_ENCRYPTED = ['notes'];
-    private const PAYMENT_ENCRYPTED = ['reference_number', 'notes'];
+    private const INVOICE_ENCRYPTED      = ['notes'];
+    private const INVOICE_JSON_ENCRYPTED = ['line_items'];
+    private const PAYMENT_ENCRYPTED      = ['reference_number', 'notes'];
 
     public function __construct()
     {
@@ -109,10 +110,15 @@ class BillingService
             $data['notes'] = $this->encryption->encryptField($data['notes']);
         }
 
-        $invoiceId = $this->invoiceModel->create(array_merge($data, ['tenant_id' => $tenantId]));
+        // Encrypt line_items JSON before storing
+        if (!empty($data['line_items'])) {
+            $json = is_array($data['line_items']) ? json_encode($data['line_items']) : $data['line_items'];
+            $data['line_items'] = $this->encryption->encryptField($json);
+        }
+
+        $invoiceId = $this->invoiceModel->create($data);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'INVOICE_CREATED',
             'severity'     => 'info',
@@ -152,7 +158,7 @@ class BillingService
         }
 
         // Validate payment_method (Bug 17)
-        $allowedMethods = ['cash', 'card', 'UPI', 'bank_transfer', 'insurance'];
+        $allowedMethods = ['cash', 'card', 'upi', 'bank_transfer', 'insurance'];
         if (empty($data['payment_method']) || !in_array($data['payment_method'], $allowedMethods)) {
             throw new ValidationException('Validation failed', [
                 'payment_method' => 'payment_method is required. Allowed: ' . implode(', ', $allowedMethods),
@@ -168,7 +174,6 @@ class BillingService
         }
 
         $this->paymentModel->create(array_merge($paymentData, [
-            'tenant_id'  => $tenantId,
             'invoice_id' => $invoiceId,
             'patient_id' => $invoice['patient_id'],
         ]));
@@ -176,7 +181,6 @@ class BillingService
         $this->invoiceModel->updateStatus($invoiceId, $tenantId, 'paid');
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'PAYMENT_RECORDED',
             'severity'     => 'info',
@@ -204,9 +208,12 @@ class BillingService
             }
         }
 
-        // Decode line_items JSON consistently (fixes Bug 16)
-        if (is_string($invoice['line_items'] ?? null)) {
-            $invoice['line_items'] = json_decode($invoice['line_items'], true) ?? [];
+        // Decrypt and decode line_items JSON
+        if (!empty($invoice['line_items'])) {
+            $decrypted = $this->encryption->decryptField($invoice['line_items']);
+            $invoice['line_items'] = json_decode($decrypted, true) ?? [];
+        } else {
+            $invoice['line_items'] = [];
         }
 
         // Decrypt and assemble patient_name from individual encrypted columns (fixes Bug 2)

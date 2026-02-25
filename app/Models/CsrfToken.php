@@ -16,20 +16,19 @@ class CsrfToken
 
     /**
      * Store a new CSRF token for user.
-     * Replaces any existing token for this user+tenant.
+     * Replaces any existing token for this user.
+     * $tenantId parameter kept for interface compatibility but no longer used in query.
      */
     public function store(int $userId, int $tenantId, string $tokenHash, int $expiresIn = 3600): void
     {
-        // Delete any existing CSRF token for this user+tenant first
         $this->deleteForUser($userId, $tenantId);
 
         $stmt = $this->db->prepare('
-            INSERT INTO sessions (user_id, tenant_id, token_hash, expires_at)
-            VALUES (:user_id, :tenant_id, :token_hash, DATE_ADD(NOW(), INTERVAL :expires_in SECOND))
+            INSERT INTO sessions (user_id, token_hash, expires_at)
+            VALUES (:user_id, :token_hash, DATE_ADD(NOW(), INTERVAL :expires_in SECOND))
         ');
         $stmt->execute([
             ':user_id'    => $userId,
-            ':tenant_id'  => $tenantId,
             ':token_hash' => $tokenHash,
             ':expires_in' => $expiresIn,
         ]);
@@ -50,13 +49,12 @@ class CsrfToken
 
     /**
      * Delete CSRF token on logout.
+     * $tenantId parameter kept for interface compatibility.
      */
     public function deleteForUser(int $userId, int $tenantId): void
     {
-        $stmt = $this->db->prepare('
-            DELETE FROM sessions WHERE user_id = ? AND tenant_id = ?
-        ');
-        $stmt->execute([$userId, $tenantId]);
+        $stmt = $this->db->prepare('DELETE FROM sessions WHERE user_id = ?');
+        $stmt->execute([$userId]);
     }
 
     /**

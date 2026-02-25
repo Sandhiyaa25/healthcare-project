@@ -124,10 +124,13 @@ class AppointmentService
             throw new ValidationException('Patient not found in this tenant');
         }
 
-        // Verify doctor belongs to tenant (Bug 6)
+        // Verify doctor belongs to tenant and has the doctor role
         $doctor = $this->userModel->findById((int) $data['doctor_id'], $tenantId);
         if (!$doctor) {
             throw new ValidationException('Doctor not found in this tenant');
+        }
+        if (($doctor['role_slug'] ?? '') !== 'doctor') {
+            throw new ValidationException('The specified user is not a doctor');
         }
 
         // Check for doctor time conflict
@@ -159,10 +162,9 @@ class AppointmentService
             $data['notes'] = $this->encryption->encryptField($data['notes']);
         }
 
-        $apptId = $this->appointmentModel->create(array_merge($data, ['tenant_id' => $tenantId]));
+        $apptId = $this->appointmentModel->create($data);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'APPOINTMENT_CREATED',
             'severity'     => 'info',
@@ -188,11 +190,14 @@ class AppointmentService
             throw new ValidationException('Validation failed', $errors);
         }
 
-        // If doctor_id is being changed, verify the new doctor belongs to the tenant
+        // If doctor_id is being changed, verify the new doctor belongs to the tenant and has doctor role
         if (isset($data['doctor_id']) && (int) $data['doctor_id'] !== (int) $appt['doctor_id']) {
             $newDoctor = $this->userModel->findById((int) $data['doctor_id'], $tenantId);
             if (!$newDoctor) {
                 throw new ValidationException('Doctor not found in this tenant');
+            }
+            if (($newDoctor['role_slug'] ?? '') !== 'doctor') {
+                throw new ValidationException('The specified user is not a doctor');
             }
         }
 
@@ -239,7 +244,6 @@ class AppointmentService
         $this->appointmentModel->update($id, $tenantId, $updateData);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'APPOINTMENT_UPDATED',
             'severity'     => 'info',
@@ -270,7 +274,6 @@ class AppointmentService
         $this->appointmentModel->update($id, $tenantId, array_merge($appt, ['status' => 'cancelled']));
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'APPOINTMENT_CANCELLED',
             'severity'     => 'info',
@@ -353,6 +356,35 @@ class AppointmentService
     }
 
     /**
+     * DELETE /api/appointments/{id} — admin only hard delete.
+     * Only completed or cancelled appointments should be deleted.
+     */
+    public function delete(int $id, int $tenantId, int $userId, string $ip, string $userAgent): void
+    {
+        $appt = $this->appointmentModel->findById($id, $tenantId);
+        if (!$appt) {
+            throw new ValidationException('Appointment not found');
+        }
+
+        if (!in_array($appt['status'], ['cancelled', 'completed'])) {
+            throw new ValidationException('Only cancelled or completed appointments can be deleted. Cancel it first.');
+        }
+
+        $this->appointmentModel->delete($id);
+
+        $this->auditLog->log([
+            'user_id'      => $userId,
+            'action'       => 'APPOINTMENT_DELETED',
+            'severity'     => 'warning',
+            'resource_type'=> 'appointment',
+            'resource_id'  => $id,
+            'ip_address'   => $ip,
+            'user_agent'   => $userAgent,
+            'old_values'   => ['status' => $appt['status'], 'date' => $appt['appointment_date']],
+        ]);
+    }
+
+    /**
      * Update appointment status only (confirmed, completed, no_show).
      */
     public function updateStatus(int $id, string $status, int $tenantId, int $userId, string $ip, string $userAgent): array
@@ -370,7 +402,6 @@ class AppointmentService
         $this->appointmentModel->update($id, $tenantId, array_merge($appt, ['status' => $status]));
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'APPOINTMENT_STATUS_UPDATED',
             'severity'     => 'info',

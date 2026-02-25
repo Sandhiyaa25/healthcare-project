@@ -14,73 +14,72 @@ class User
         $this->db = Database::getInstance();
     }
 
-    public function findById(int $id, int $tenantId): ?array
+    public function findById(int $id, int $tenantId = 0): ?array
     {
         $stmt = $this->db->prepare("
             SELECT u.*, r.name AS role_name, r.slug AS role_slug
             FROM users u
             JOIN roles r ON r.id = u.role_id
-            WHERE u.id = ? AND u.tenant_id = ? AND u.status != 'deleted'
+            WHERE u.id = ? AND u.status != 'deleted'
         ");
-        $stmt->execute([$id, $tenantId]);
+        $stmt->execute([$id]);
         return $stmt->fetch() ?: null;
     }
 
-    public function findByEmail(string $email, int $tenantId): ?array
+    public function findByEmail(string $email, int $tenantId = 0): ?array
     {
         $stmt = $this->db->prepare("
             SELECT u.*, r.name AS role_name, r.slug AS role_slug
             FROM users u
             JOIN roles r ON r.id = u.role_id
-            WHERE u.email = ? AND u.tenant_id = ? AND u.status != 'deleted'
+            WHERE u.email = ? AND u.status != 'deleted'
         ");
-        $stmt->execute([$email, $tenantId]);
+        $stmt->execute([$email]);
         return $stmt->fetch() ?: null;
     }
 
-    public function findByUsername(string $username, int $tenantId): ?array
+    public function findByUsername(string $username, int $tenantId = 0): ?array
     {
         $stmt = $this->db->prepare("
             SELECT u.*, r.name AS role_name, r.slug AS role_slug
             FROM users u
             JOIN roles r ON r.id = u.role_id
-            WHERE u.username = ? AND u.tenant_id = ? AND u.status != 'deleted'
+            WHERE u.username = ? AND u.status != 'deleted'
         ");
-        $stmt->execute([$username, $tenantId]);
+        $stmt->execute([$username]);
         return $stmt->fetch() ?: null;
     }
 
-    public function findByEmailBlindIndex(string $blindIndex, int $tenantId): ?array
+    public function findByEmailBlindIndex(string $blindIndex, int $tenantId = 0): ?array
     {
         $stmt = $this->db->prepare("
             SELECT u.*, r.name AS role_name, r.slug AS role_slug
             FROM users u
             JOIN roles r ON r.id = u.role_id
-            WHERE u.email_blind_index = ? AND u.tenant_id = ? AND u.status != 'deleted'
+            WHERE u.email_blind_index = ? AND u.status != 'deleted'
         ");
-        $stmt->execute([$blindIndex, $tenantId]);
+        $stmt->execute([$blindIndex]);
         return $stmt->fetch() ?: null;
     }
 
-    public function getAll(int $tenantId, array $filters = [], int $page = 1, int $perPage = 20): array
+    public function getAll(int $tenantId = 0, array $filters = [], int $page = 1, int $perPage = 20): array
     {
-        $where  = ["u.tenant_id = :tenant_id", "u.status != 'deleted'"];
-        $params = [':tenant_id' => $tenantId];
+        $where  = ["u.status != 'deleted'"];
+        $params = [];
 
         if (!empty($filters['role_id'])) {
-            $where[]              = 'u.role_id = :role_id';
-            $params[':role_id']   = $filters['role_id'];
+            $where[]            = 'u.role_id = :role_id';
+            $params[':role_id'] = $filters['role_id'];
         }
 
         if (!empty($filters['status'])) {
-            $where[]              = 'u.status = :status';
-            $params[':status']    = $filters['status'];
+            $where[]           = 'u.status = :status';
+            $params[':status'] = $filters['status'];
         }
 
         if (!empty($filters['search'])) {
-            // Use blind index for email, name search
-            $where[]              = '(u.first_name_blind_index = :search_index OR u.last_name_blind_index = :search_index OR u.email_blind_index = :search_index)';
-            $params[':search_index'] = $filters['search_blind_index'];
+            $where[]                   = '(u.first_name_blind_index = :search_index OR u.last_name_blind_index = :search_index OR u.email_blind_index = :search_index)';
+            $params[':search_index']   = $filters['search_blind_index'];
         }
 
         $offset = ($page - 1) * $perPage;
@@ -103,16 +102,15 @@ class User
     {
         $stmt = $this->db->prepare('
             INSERT INTO users
-                (tenant_id, role_id, username, email, email_blind_index, password_hash,
+                (role_id, username, email, email_blind_index, password_hash,
                  first_name, first_name_blind_index, last_name, last_name_blind_index,
                  phone, status)
             VALUES
-                (:tenant_id, :role_id, :username, :email, :email_blind_index, :password_hash,
+                (:role_id, :username, :email, :email_blind_index, :password_hash,
                  :first_name, :first_name_blind_index, :last_name, :last_name_blind_index,
                  :phone, :status)
         ');
         $stmt->execute([
-            ':tenant_id'               => $data['tenant_id'],
             ':role_id'                 => $data['role_id'],
             ':username'                => $data['username'],
             ':email'                   => $data['email'],
@@ -128,14 +126,14 @@ class User
         return (int) $this->db->lastInsertId();
     }
 
-    public function update(int $id, int $tenantId, array $data): bool
+    public function update(int $id, int $tenantId = 0, array $data = []): bool
     {
         $stmt = $this->db->prepare('
             UPDATE users SET
                 first_name = :first_name, first_name_blind_index = :first_name_blind_index,
                 last_name  = :last_name,  last_name_blind_index  = :last_name_blind_index,
                 phone = :phone, status = :status, role_id = :role_id
-            WHERE id = :id AND tenant_id = :tenant_id
+            WHERE id = :id
         ');
         return $stmt->execute([
             ':first_name'             => $data['first_name'] ?? null,
@@ -146,22 +144,21 @@ class User
             ':status'                 => $data['status'] ?? 'active',
             ':role_id'                => $data['role_id'],
             ':id'                     => $id,
-            ':tenant_id'              => $tenantId,
         ]);
     }
 
-    public function updatePassword(int $id, int $tenantId, string $passwordHash): bool
+    public function updatePassword(int $id, int $tenantId = 0, string $passwordHash = ''): bool
     {
         $stmt = $this->db->prepare(
-            "UPDATE users SET password_hash = ?, must_change_password = FALSE WHERE id = ? AND tenant_id = ?"
+            "UPDATE users SET password_hash = ?, must_change_password = FALSE WHERE id = ?"
         );
-        return $stmt->execute([$passwordHash, $id, $tenantId]);
+        return $stmt->execute([$passwordHash, $id]);
     }
 
-    public function softDelete(int $id, int $tenantId): bool
+    public function softDelete(int $id, int $tenantId = 0): bool
     {
-        $stmt = $this->db->prepare("UPDATE users SET status = 'deleted' WHERE id = ? AND tenant_id = ?");
-        return $stmt->execute([$id, $tenantId]) && $stmt->rowCount() > 0;
+        $stmt = $this->db->prepare("UPDATE users SET status = 'deleted' WHERE id = ?");
+        return $stmt->execute([$id]) && $stmt->rowCount() > 0;
     }
 
     public function updateLoginMeta(int $id, string $ip, ?int $failCount = null): void
@@ -181,9 +178,17 @@ class User
         $stmt->execute([$minutes, $id]);
     }
 
-    public function setMustChangePassword(int $id, int $tenantId, bool $value): void
+    public function resetLockout(int $id): void
     {
-        $stmt = $this->db->prepare('UPDATE users SET must_change_password = ? WHERE id = ? AND tenant_id = ?');
-        $stmt->execute([$value ? 1 : 0, $id, $tenantId]);
+        $stmt = $this->db->prepare(
+            "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = ?"
+        );
+        $stmt->execute([$id]);
+    }
+
+    public function setMustChangePassword(int $id, int $tenantId = 0, bool $value = true): void
+    {
+        $stmt = $this->db->prepare('UPDATE users SET must_change_password = ? WHERE id = ?');
+        $stmt->execute([$value ? 1 : 0, $id]);
     }
 }

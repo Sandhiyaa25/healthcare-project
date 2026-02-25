@@ -31,6 +31,21 @@ class MessageService
         $this->encryption       = new EncryptionService();
     }
 
+    public function getInbox(int $userId, string $role, int $tenantId, int $page, int $perPage): array
+    {
+        $patientId = 0;
+        if ($role === 'patient') {
+            $patient = $this->patientModel->findByUserId($userId, $tenantId);
+            if (!$patient) {
+                return [];
+            }
+            $patientId = (int) $patient['id'];
+        }
+
+        $messages = $this->messageModel->getInboxForUser($role, $userId, $patientId, $page, $perPage);
+        return array_map([$this, 'decryptMessage'], $messages);
+    }
+
     public function getByAppointment(int $appointmentId, int $tenantId, string $role, int $userId, string $ip = '', string $userAgent = ''): array
     {
         $appt = $this->appointmentModel->findById($appointmentId, $tenantId);
@@ -50,7 +65,6 @@ class MessageService
 
             // Audit patient message reads (Bug 19)
             $this->auditLog->log([
-                'tenant_id'    => $tenantId,
                 'user_id'      => $userId,
                 'action'       => 'MESSAGE_READ',
                 'severity'     => 'info',
@@ -96,7 +110,6 @@ class MessageService
         $encryptedMessage = $this->encryption->encryptField($data['message']);
 
         $messageId = $this->messageModel->create([
-            'tenant_id'      => $tenantId,
             'appointment_id' => $data['appointment_id'],
             'sender_id'      => $senderId,
             'message'        => $encryptedMessage,
@@ -105,7 +118,6 @@ class MessageService
 
         // Audit log message sent (Bug 19)
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $senderId,
             'action'       => 'MESSAGE_SENT',
             'severity'     => 'info',

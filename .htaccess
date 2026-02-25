@@ -13,9 +13,6 @@
 Options -Indexes
 RewriteEngine On
 
-# Allow hash.php to be accessed directly
-RewriteRule ^hash\.php$ - [L]
-
 # If request is already inside /public, do nothing
 RewriteCond %{REQUEST_URI} ^/healthcare-project/public/ [NC]
 RewriteRule ^ - [L]

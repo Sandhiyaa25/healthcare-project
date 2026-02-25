@@ -4,20 +4,25 @@ namespace App\Middleware;
 
 use Core\Request;
 
+/**
+ * SanitizationMiddleware
+ *
+ * Trims whitespace and removes null bytes from all string input values.
+ *
+ * NOTE: HTML encoding (htmlspecialchars / strip_tags) is intentionally NOT
+ * applied here because this is a JSON API whose responses are consumed by
+ * clients, not rendered as HTML. Encoding medical text such as
+ * "BP > 120/80" or "WBC < 4000" would corrupt stored clinical data.
+ *
+ * SQL injection protection is handled at the DB layer via PDO prepared
+ * statements throughout all models.
+ */
 class SanitizationMiddleware
 {
     public function handle(Request $request): void
     {
-        $body = $request->body();
-        $sanitized = $this->sanitizeArray($body);
-
-        // Rebuild body with sanitized values
-        foreach ($sanitized as $key => $value) {
-            // Inject back - we do it by reflective approach on the body array
-        }
-
-        // Set sanitized body back via attribute
-        $request->setAttribute('sanitized_body', $sanitized);
+        $sanitized = $this->sanitizeArray($request->body());
+        $request->setBody($sanitized);
     }
 
     private function sanitizeArray(array $data): array
@@ -25,12 +30,12 @@ class SanitizationMiddleware
         $clean = [];
 
         foreach ($data as $key => $value) {
-            $key = htmlspecialchars(strip_tags((string) $key), ENT_QUOTES, 'UTF-8');
-
             if (is_array($value)) {
                 $clean[$key] = $this->sanitizeArray($value);
             } elseif (is_string($value)) {
-                $clean[$key] = htmlspecialchars(strip_tags($value), ENT_QUOTES, 'UTF-8');
+                // Remove null bytes (legitimate security concern) and trim whitespace.
+                // Do NOT HTML-encode — this is a JSON API, not an HTML renderer.
+                $clean[$key] = trim(str_replace("\0", '', $value));
             } else {
                 $clean[$key] = $value;
             }

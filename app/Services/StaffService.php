@@ -7,18 +7,21 @@ use App\Models\User;
 use App\Models\AuditLog;
 use App\Exceptions\ValidationException;
 use App\Exceptions\AuthException;
+use App\Exceptions\NotFoundException;
 
 class StaffService
 {
-    private Staff    $staffModel;
-    private User     $userModel;
-    private AuditLog $auditLog;
+    private Staff             $staffModel;
+    private User              $userModel;
+    private AuditLog          $auditLog;
+    private EncryptionService $encryption;
 
     public function __construct()
     {
         $this->staffModel = new Staff();
         $this->userModel  = new User();
         $this->auditLog   = new AuditLog();
+        $this->encryption = new EncryptionService();
     }
 
     // ─── Admin only: create/update/delete ───────────────────────────
@@ -31,16 +34,27 @@ class StaffService
             return ['staff' => [], 'message' => 'No staff found in your tenant'];
         }
 
-        return ['staff' => $staff];
+        return ['staff' => array_map([$this, 'decryptStaff'], $staff)];
     }
 
     public function getById(int $id, int $tenantId): array
     {
         $staff = $this->staffModel->findById($id, $tenantId);
         if (!$staff) {
-            throw new ValidationException('Staff not found in your tenant');
+            throw new NotFoundException('Staff not found in your tenant');
         }
-        return $staff;
+        return $this->decryptStaff($staff);
+    }
+
+    public function getByUserId(int $userId, int $tenantId): array
+    {
+        $staff = $this->staffModel->findByUserId($userId, $tenantId);
+        if (!$staff) {
+            throw new NotFoundException('No staff profile linked to your account');
+        }
+        // Fetch again via findById to get role_name and user name join
+        $full = $this->staffModel->findById($staff['id'], $tenantId) ?? $staff;
+        return $this->decryptStaff($full);
     }
 
     public function create(array $data, int $tenantId, int $adminId, string $ip, string $userAgent): array
@@ -64,10 +78,9 @@ class StaffService
         // role_id comes from the user's own role if not provided
         $data['role_id'] = $data['role_id'] ?? $user['role_id'];
 
-        $staffId = $this->staffModel->create(array_merge($data, ['tenant_id' => $tenantId]));
+        $staffId = $this->staffModel->create($data);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $adminId,
             'action'       => 'STAFF_CREATED',
             'severity'     => 'info',
@@ -77,7 +90,7 @@ class StaffService
             'user_agent'   => $userAgent,
         ]);
 
-        return $this->staffModel->findById($staffId, $tenantId);
+        return $this->decryptStaff($this->staffModel->findById($staffId, $tenantId));
     }
 
     public function update(int $id, array $data, int $tenantId, int $adminId, string $ip, string $userAgent): array
@@ -99,7 +112,6 @@ class StaffService
         $this->staffModel->update($id, $tenantId, $updateData);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $adminId,
             'action'       => 'STAFF_UPDATED',
             'severity'     => 'info',
@@ -109,7 +121,7 @@ class StaffService
             'user_agent'   => $userAgent,
         ]);
 
-        return $this->staffModel->findById($id, $tenantId);
+        return $this->decryptStaff($this->staffModel->findById($id, $tenantId));
     }
 
     public function delete(int $id, int $tenantId, int $adminId, string $ip, string $userAgent): void
@@ -122,7 +134,6 @@ class StaffService
         $this->staffModel->softDelete($id, $tenantId);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $adminId,
             'action'       => 'STAFF_DELETED',
             'severity'     => 'warning',
@@ -131,5 +142,18 @@ class StaffService
             'ip_address'   => $ip,
             'user_agent'   => $userAgent,
         ]);
+    }
+
+    // ─── AES helpers ─────────────────────────────────────────────────
+
+    private function decryptStaff(array $staff): array
+    {
+        // Decrypt user name and email columns joined from the users table
+        foreach (['user_first_name', 'user_last_name', 'user_email'] as $field) {
+            if (!empty($staff[$field])) {
+                $staff[$field] = $this->encryption->decryptField($staff[$field]);
+            }
+        }
+        return $staff;
     }
 }

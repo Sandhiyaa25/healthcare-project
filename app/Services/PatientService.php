@@ -6,6 +6,7 @@ use App\Models\Patient;
 use App\Models\User;
 use App\Models\AuditLog;
 use App\Validators\PatientValidator;
+use App\Exceptions\NotFoundException;
 use App\Exceptions\ValidationException;
 
 class PatientService
@@ -38,23 +39,31 @@ private const ENCRYPTED_FIELDS = [
             $filters['search_blind_index'] = $this->encryption->blindIndex($filters['search']);
         }
 
+        $total    = $this->patientModel->count($tenantId, $filters);
         $patients = $this->patientModel->getAll($tenantId, $filters, $page, $perPage);
 
+        $msg = '';
         if (empty($patients)) {
             $msg = !empty($filters['search'])
-                ? 'No patients found matching "' . $filters['search'] . '" in your tenant'
-                : 'No patients found in your tenant';
-            return ['patients' => [], 'message' => $msg];
+                ? 'No patients found matching "' . $filters['search'] . '"'
+                : 'No patients found';
         }
 
-        return ['patients' => array_map([$this, 'decryptAndSafe'], $patients)];
+        return [
+            'patients'  => array_map([$this, 'decryptAndSafe'], $patients),
+            'total'     => $total,
+            'page'      => $page,
+            'per_page'  => $perPage,
+            'last_page' => $total > 0 ? (int) ceil($total / $perPage) : 1,
+            'message'   => $msg ?: null,
+        ];
     }
 
     public function getById(int $id, int $tenantId): array
     {
         $patient = $this->patientModel->findById($id, $tenantId);
         if (!$patient) {
-            throw new ValidationException('Patient not found');
+            throw new NotFoundException('Patient not found');
         }
         return $this->decryptAndSafe($patient);
     }
@@ -72,11 +81,21 @@ private const ENCRYPTED_FIELDS = [
         $lnBlind    = $this->encryption->blindIndex($data['last_name']);
         $emailBlind = !empty($data['email']) ? $this->encryption->blindIndex($data['email']) : null;
 
+        // Check for duplicate patient email (same as User model does for users)
+        if ($emailBlind !== null) {
+            $existing = $this->patientModel->findByEmailBlindIndex($emailBlind, $tenantId);
+            if ($existing) {
+                throw new ValidationException('Validation failed', ['email' => 'A patient with this email already exists']);
+            }
+        }
+
         // Auto-link user account: if user_id not provided, find user by email blind index
+        $autoLinkedUserId = null;
         if (empty($data['user_id']) && $emailBlind !== null) {
             $linkedUser = $this->userModel->findByEmailBlindIndex($emailBlind, $tenantId);
             if ($linkedUser && ($linkedUser['role_slug'] ?? '') === 'patient') {
-                $data['user_id'] = $linkedUser['id'];
+                $data['user_id']  = $linkedUser['id'];
+                $autoLinkedUserId = $linkedUser['id'];
             }
         }
 
@@ -84,7 +103,6 @@ private const ENCRYPTED_FIELDS = [
         $encrypted = $this->encryptFields($data);
 
         $patientId = $this->patientModel->create(array_merge($encrypted, [
-            'tenant_id'              => $tenantId,
             'user_id'                => !empty($data['user_id']) ? (int) $data['user_id'] : null,
             'blood_group'            => $data['blood_group'] ?? null,
             'gender'                 => $data['gender'] ?? null,
@@ -95,7 +113,6 @@ private const ENCRYPTED_FIELDS = [
         ]));
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'PATIENT_CREATED',
             'severity'     => 'info',
@@ -103,7 +120,22 @@ private const ENCRYPTED_FIELDS = [
             'resource_id'  => $patientId,
             'ip_address'   => $ip,
             'user_agent'   => $userAgent,
+            'new_values'   => ['auto_linked_user_id' => $autoLinkedUserId],
         ]);
+
+        // Log auto-link separately so it is clearly visible in audit trail
+        if ($autoLinkedUserId !== null) {
+            $this->auditLog->log([
+                'user_id'      => $userId,
+                'action'       => 'PATIENT_USER_AUTO_LINKED',
+                'severity'     => 'info',
+                'resource_type'=> 'patient',
+                'resource_id'  => $patientId,
+                'ip_address'   => $ip,
+                'user_agent'   => $userAgent,
+                'new_values'   => ['linked_user_id' => $autoLinkedUserId],
+            ]);
+        }
 
         return $this->decryptAndSafe($this->patientModel->findById($patientId, $tenantId));
     }
@@ -112,7 +144,7 @@ private const ENCRYPTED_FIELDS = [
     {
         $patient = $this->patientModel->findById($id, $tenantId);
         if (!$patient) {
-            throw new ValidationException('Patient not found');
+            throw new NotFoundException('Patient not found');
         }
 
         $validator = new PatientValidator();
@@ -151,7 +183,6 @@ private const ENCRYPTED_FIELDS = [
         }
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'PATIENT_UPDATED',
             'severity'     => 'info',
@@ -168,7 +199,7 @@ private const ENCRYPTED_FIELDS = [
     {
         $patient = $this->patientModel->findByUserId($userId, $tenantId);
         if (!$patient) {
-            throw new ValidationException('No patient profile linked to your account. Please contact reception.');
+            throw new NotFoundException('No patient profile linked to your account. Please contact reception.');
         }
         return $this->decryptAndSafe($patient);
     }
@@ -177,7 +208,7 @@ private const ENCRYPTED_FIELDS = [
     {
         $patient = $this->patientModel->findByUserId($userId, $tenantId);
         if (!$patient) {
-            throw new ValidationException('No patient profile linked to your account');
+            throw new NotFoundException('No patient profile linked to your account. Please contact reception.');
         }
 
         $allowed  = ['phone', 'address', 'emergency_contact_name', 'emergency_contact_phone'];
@@ -203,7 +234,6 @@ private const ENCRYPTED_FIELDS = [
         $this->patientModel->update($patient['id'], $tenantId, $updateData);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'PATIENT_SELF_UPDATED',
             'severity'     => 'info',
@@ -221,13 +251,17 @@ private const ENCRYPTED_FIELDS = [
     {
         $patient = $this->patientModel->findById($id, $tenantId);
         if (!$patient) {
-            throw new ValidationException('Patient not found');
+            throw new NotFoundException('Patient not found');
         }
 
         $this->patientModel->softDelete($id, $tenantId);
 
+        // Deactivate the linked user account so the patient can no longer log in
+        if (!empty($patient['user_id'])) {
+            $this->userModel->softDelete((int) $patient['user_id']);
+        }
+
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'PATIENT_DELETED',
             'severity'     => 'warning',
@@ -235,6 +269,7 @@ private const ENCRYPTED_FIELDS = [
             'resource_id'  => $id,
             'ip_address'   => $ip,
             'user_agent'   => $userAgent,
+            'new_values'   => ['linked_user_id' => $patient['user_id'] ?? null],
         ]);
     }
 

@@ -21,7 +21,7 @@ class BillingController
         $role     = $request->getAttribute('auth_role');
         $userId   = (int) $request->getAttribute('auth_user_id');
         $page     = (int) $request->query('page', 1);
-        $perPage  = (int) $request->query('per_page', 20);
+        $perPage  = min(max((int) $request->query('per_page', 20), 1), 100);
 
         // Patient: only see their own invoices — filtered inside service
         if ($role === 'patient') {

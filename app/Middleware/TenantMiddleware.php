@@ -2,6 +2,7 @@
 
 namespace App\Middleware;
 
+use Core\Database;
 use Core\Request;
 use Core\Response;
 use App\Models\Tenant;
@@ -16,13 +17,16 @@ class TenantMiddleware
             Response::forbidden('Tenant information missing', 'TENANT_MISSING');
         }
 
-        // Verify tenant is active in DB
+        // Verify tenant is active in master DB
         $tenantModel = new Tenant();
         $tenant      = $tenantModel->findActiveById((int) $tenantId);
 
         if (!$tenant) {
             Response::forbidden('Tenant not found or inactive', 'TENANT_INACTIVE');
         }
+
+        // Switch the active DB connection to this tenant's isolated database
+        Database::setCurrentTenant($tenant['db_name']);
 
         $request->setAttribute('tenant', $tenant);
     }

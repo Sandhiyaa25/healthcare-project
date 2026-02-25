@@ -14,21 +14,21 @@ class Invoice
         $this->db = Database::getInstance();
     }
 
-    public function findById(int $id, int $tenantId): ?array
+    public function findById(int $id, int $tenantId = 0): ?array
     {
         $stmt = $this->db->prepare("
             SELECT i.*, p.first_name AS patient_first_name, p.last_name AS patient_last_name
             FROM invoices i LEFT JOIN patients p ON p.id = i.patient_id
-            WHERE i.id = ? AND i.tenant_id = ?
+            WHERE i.id = ?
         ");
-        $stmt->execute([$id, $tenantId]);
+        $stmt->execute([$id]);
         return $stmt->fetch() ?: null;
     }
 
-    public function getAll(int $tenantId, array $filters = [], int $page = 1, int $perPage = 20): array
+    public function getAll(int $tenantId = 0, array $filters = [], int $page = 1, int $perPage = 20): array
     {
-        $where  = ['i.tenant_id = :tenant_id'];
-        $params = [':tenant_id' => $tenantId];
+        $where  = ['1=1'];
+        $params = [];
 
         if (!empty($filters['patient_id'])) {
             $where[]               = 'i.patient_id = :patient_id';
@@ -57,11 +57,10 @@ class Invoice
     public function create(array $data): int
     {
         $stmt = $this->db->prepare('
-            INSERT INTO invoices (tenant_id, patient_id, appointment_id, amount, tax, discount, total_amount, status, due_date, notes, line_items)
-            VALUES (:tenant_id, :patient_id, :appointment_id, :amount, :tax, :discount, :total_amount, :status, :due_date, :notes, :line_items)
+            INSERT INTO invoices (patient_id, appointment_id, amount, tax, discount, total_amount, status, due_date, notes, line_items)
+            VALUES (:patient_id, :appointment_id, :amount, :tax, :discount, :total_amount, :status, :due_date, :notes, :line_items)
         ');
         $stmt->execute([
-            ':tenant_id'      => $data['tenant_id'],
             ':patient_id'     => $data['patient_id'],
             ':appointment_id' => $data['appointment_id'] ?? null,
             ':amount'         => $data['amount'],
@@ -76,31 +75,31 @@ class Invoice
         return (int) $this->db->lastInsertId();
     }
 
-    public function updateStatus(int $id, int $tenantId, string $status): bool
+    public function updateStatus(int $id, int $tenantId = 0, string $status = ''): bool
     {
-        $stmt = $this->db->prepare("UPDATE invoices SET status = ? WHERE id = ? AND tenant_id = ?");
-        return $stmt->execute([$status, $id, $tenantId]);
+        $stmt = $this->db->prepare("UPDATE invoices SET status = ? WHERE id = ?");
+        return $stmt->execute([$status, $id]);
     }
 
-    public function getSummary(int $tenantId): array
+    public function getSummary(int $tenantId = 0): array
     {
         $stmt = $this->db->prepare("
             SELECT status, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
-            FROM invoices WHERE tenant_id = ? GROUP BY status
+            FROM invoices GROUP BY status
         ");
-        $stmt->execute([$tenantId]);
+        $stmt->execute();
         return $stmt->fetchAll();
     }
 
-    public function getSummaryByDateRange(int $tenantId, string $startDate, string $endDate): array
+    public function getSummaryByDateRange(int $tenantId = 0, string $startDate = '', string $endDate = ''): array
     {
         $stmt = $this->db->prepare("
             SELECT status, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total
             FROM invoices
-            WHERE tenant_id = ? AND DATE(created_at) BETWEEN ? AND ?
+            WHERE DATE(created_at) BETWEEN ? AND ?
             GROUP BY status
         ");
-        $stmt->execute([$tenantId, $startDate, $endDate]);
+        $stmt->execute([$startDate, $endDate]);
         return $stmt->fetchAll();
     }
 }

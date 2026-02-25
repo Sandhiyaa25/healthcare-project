@@ -28,7 +28,7 @@ class TenantController
     public function index(Request $request): void
     {
         $page    = (int) $request->query('page', 1);
-        $perPage = (int) $request->query('per_page', 20);
+        $perPage = min(max((int) $request->query('per_page', 20), 1), 100);
         $status  = $request->query('status'); // filter by status optionally
 
         $tenants = $this->tenantService->getAll($page, $perPage, $status);
@@ -87,6 +87,19 @@ class TenantController
 
         $tenant = $this->tenantService->reactivate($id, $adminId);
         Response::success($tenant, 'Tenant reactivated successfully');
+    }
+
+    /**
+     * POST /api/platform/tenants/{id}/reset-admin-password
+     * Platform admin resets the tenant's admin user password and returns a one-time temp password.
+     */
+    public function resetAdminPassword(Request $request): void
+    {
+        $id      = (int) $request->param('id');
+        $adminId = (int) $request->getAttribute('platform_admin_id');
+
+        $result = $this->tenantService->resetAdminPassword($id, $adminId);
+        Response::success($result, 'Admin password reset successfully');
     }
 
     /**

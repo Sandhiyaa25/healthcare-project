@@ -9,6 +9,7 @@ use App\Models\CsrfToken;
 use App\Models\AuditLog;
 use App\Exceptions\AuthException;
 use App\Exceptions\ValidationException;
+use Core\Database;
 use Core\Env;
 
 class AuthService
@@ -45,17 +46,26 @@ class AuthService
             throw new ValidationException('tenant_id, username and password are required');
         }
 
-        // Validate tenant
+        // Validate tenant (master DB)
         $tenant = $this->tenantModel->findActiveById($tenantId);
         if (!$tenant) {
             throw new AuthException('Invalid tenant or tenant is inactive');
         }
 
-        // Find user
-        $user = $this->userModel->findByUsername($username, $tenantId);
+        // Switch to tenant DB for all subsequent queries
+        Database::setCurrentTenant($tenant['db_name']);
+
+        // Re-instantiate tenant-scoped models now that the tenant DB is active.
+        // The constructor captured master DB (currentTenantDb was null then),
+        // so we must rebuild them here to get the correct tenant connection.
+        $this->userModel      = new User();
+        $this->auditLog       = new AuditLog();
+        $this->csrfTokenModel = new CsrfToken();
+
+        // Find user in tenant DB
+        $user = $this->userModel->findByUsername($username);
         if (!$user) {
             $this->auditLog->log([
-                'tenant_id' => $tenantId,
                 'action'    => 'LOGIN_FAILED',
                 'severity'  => 'warning',
                 'status'    => 'failed',
@@ -69,6 +79,13 @@ class AuthService
         // Check account lock
         if ($user['locked_until'] && strtotime($user['locked_until']) > time()) {
             throw new AuthException('Account is temporarily locked. Please try again later.');
+        }
+
+        // If a previous lock has now expired, reset the counter so the user
+        // gets a fresh 5 attempts instead of being re-locked on the very next failure.
+        if ($user['locked_until'] && strtotime($user['locked_until']) <= time()) {
+            $this->userModel->resetLockout($user['id']);
+            $user['failed_login_attempts'] = 0;
         }
 
         // Check user status
@@ -86,7 +103,6 @@ class AuthService
             }
 
             $this->auditLog->log([
-                'tenant_id'   => $tenantId,
                 'user_id'     => $user['id'],
                 'action'      => 'LOGIN_FAILED',
                 'severity'    => 'warning',
@@ -99,9 +115,9 @@ class AuthService
             throw new AuthException('Invalid credentials');
         }
 
-        // Generate tokens
-        $accessToken  = $this->generateAccessToken($user);
-        $refreshToken = $this->generateRefreshToken($user, $ip, $userAgent);
+        // Generate tokens — pass tenantId explicitly since users table no longer has tenant_id
+        $accessToken  = $this->generateAccessToken($user, $tenantId);
+        $refreshToken = $this->generateRefreshToken($user, $ip, $userAgent, $tenantId);
         $csrfToken    = $this->generateCsrfToken($user['id'], $tenantId);
 
         // Update login meta
@@ -112,15 +128,14 @@ class AuthService
 
         // Audit log
         $this->auditLog->log([
-            'tenant_id'   => $tenantId,
-            'user_id'     => $user['id'],
-            'action'      => 'LOGIN',
-            'severity'    => 'info',
-            'status'      => 'success',
+            'user_id'      => $user['id'],
+            'action'       => 'LOGIN',
+            'severity'     => 'info',
+            'status'       => 'success',
             'resource_type'=> 'user',
-            'resource_id' => $user['id'],
-            'ip_address'  => $ip,
-            'user_agent'  => $userAgent,
+            'resource_id'  => $user['id'],
+            'ip_address'   => $ip,
+            'user_agent'   => $userAgent,
         ]);
 
         return [
@@ -136,17 +151,16 @@ class AuthService
 
     public function logout(int $userId, int $tenantId, string $ip, string $userAgent): void
     {
-        // Revoke all refresh tokens for this user+tenant combination
+        // Revoke all refresh tokens for this user (master DB)
         $this->refreshTokenModel->revokeAllForUser($userId, $tenantId);
 
-        // ✅ Delete CSRF token from sessions table
+        // Delete CSRF token from sessions table (tenant DB — set by TenantMiddleware)
         $this->csrfTokenModel->deleteForUser($userId, $tenantId);
 
         // Clear refresh token cookie
         $this->clearRefreshTokenCookie();
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'LOGOUT',
             'severity'     => 'info',
@@ -163,29 +177,58 @@ class AuthService
     public function refreshAccessToken(string $rawRefreshToken, string $ip, string $userAgent): array
     {
         $tokenHash = $this->encryption->hashToken($rawRefreshToken);
-        $stored    = $this->refreshTokenModel->findByHash($tokenHash);
 
+        // Find token in master DB
+        $stored = $this->refreshTokenModel->findByHash($tokenHash);
         if (!$stored) {
             throw new AuthException('Invalid or expired refresh token');
         }
 
-        // Load user
-        $user = $this->userModel->findById($stored['user_id'], $stored['tenant_id']);
+        // Look up tenant's DB name from master, then switch to tenant DB.
+        // Must happen before any audit log write (audit_logs lives in tenant DB).
+        $tenant = $this->tenantModel->findById((int) $stored['tenant_id']);
+        if (!$tenant || empty($tenant['db_name'])) {
+            throw new AuthException('Tenant not found');
+        }
+        Database::setCurrentTenant($tenant['db_name']);
+
+        // Re-instantiate tenant-scoped models now that the tenant DB is active.
+        $this->userModel = new User();
+        $this->auditLog  = new AuditLog();
+
+        // Log suspicious activity if the request comes from a different IP or device
+        if ($stored['ip_address'] !== $ip || $stored['user_agent'] !== $userAgent) {
+            $this->auditLog->log([
+                'user_id'    => $stored['user_id'],
+                'action'     => 'TOKEN_REFRESH_SUSPICIOUS',
+                'severity'   => 'warning',
+                'status'     => 'success',
+                'ip_address' => $ip,
+                'user_agent' => $userAgent,
+                'new_values' => [
+                    'reason'      => 'ip_or_ua_mismatch',
+                    'original_ip' => $stored['ip_address'],
+                    'current_ip'  => $ip,
+                ],
+            ]);
+        }
+
+        // Load user from tenant DB
+        $user = $this->userModel->findById($stored['user_id']);
         if (!$user || $user['status'] !== 'active') {
             throw new AuthException('User account not found or inactive');
         }
 
-        // Token rotation: revoke old refresh token, issue new access + refresh tokens
+        // Token rotation: revoke old, issue new access + refresh tokens
         // CSRF token is NOT regenerated — created at login, lives until logout
         $this->refreshTokenModel->revoke($tokenHash);
 
-        $newAccessToken  = $this->generateAccessToken($user);
-        $newRefreshToken = $this->generateRefreshToken($user, $ip, $userAgent);
+        $newAccessToken  = $this->generateAccessToken($user, (int) $stored['tenant_id']);
+        $newRefreshToken = $this->generateRefreshToken($user, $ip, $userAgent, (int) $stored['tenant_id']);
 
         $this->setRefreshTokenCookie($newRefreshToken);
 
         $this->auditLog->log([
-            'tenant_id'   => $stored['tenant_id'],
             'user_id'     => $user['id'],
             'action'      => 'TOKEN_REFRESH',
             'severity'    => 'info',
@@ -203,12 +246,12 @@ class AuthService
 
     // ─── JWT GENERATION ─────────────────────────────────────────────
 
-    private function generateAccessToken(array $user): string
+    private function generateAccessToken(array $user, int $tenantId): string
     {
         $now     = time();
         $payload = [
             'sub'       => $user['id'],
-            'tenant_id' => $user['tenant_id'],
+            'tenant_id' => $tenantId,
             'role'      => $user['role_slug'],
             'role_id'   => $user['role_id'],
             'username'  => $user['username'],
@@ -219,7 +262,7 @@ class AuthService
         return $this->encodeJwt($payload);
     }
 
-    private function generateRefreshToken(array $user, string $ip, string $userAgent): string
+    private function generateRefreshToken(array $user, string $ip, string $userAgent, int $tenantId): string
     {
         $raw       = bin2hex(random_bytes(32));
         $hash      = $this->encryption->hashToken($raw);
@@ -227,7 +270,7 @@ class AuthService
 
         $this->refreshTokenModel->create([
             'user_id'    => $user['id'],
-            'tenant_id'  => $user['tenant_id'],
+            'tenant_id'  => $tenantId,
             'token_hash' => $hash,
             'expires_at' => $expiresAt,
             'ip_address' => $ip,

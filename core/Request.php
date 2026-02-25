@@ -103,6 +103,11 @@ class Request
         return $this->body;
     }
 
+    public function setBody(array $body): void
+    {
+        $this->body = $body;
+    }
+
     public function input(string $key, mixed $default = null): mixed
     {
         return $this->body[$key] ?? $this->query[$key] ?? $default;
@@ -141,10 +146,12 @@ class Request
 
     public function ip(): string
     {
-        return $_SERVER['HTTP_X_FORWARDED_FOR']
-            ?? $_SERVER['HTTP_CLIENT_IP']
-            ?? $_SERVER['REMOTE_ADDR']
-            ?? '0.0.0.0';
+        // Use only REMOTE_ADDR — the address of the directly connected client.
+        // HTTP_X_FORWARDED_FOR and HTTP_CLIENT_IP are client-controlled headers
+        // that can be trivially spoofed to bypass IP-based rate limiting.
+        // If this API is later deployed behind a trusted reverse proxy, add
+        // proxy IP validation before trusting any forwarded header.
+        return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
     }
 
     public function userAgent(): string

@@ -80,7 +80,6 @@ class UserService
 
         // Encrypt sensitive fields
         $userId = $this->userModel->create([
-            'tenant_id'               => $tenantId,
             'role_id'                 => $data['role_id'],
             'username'                => $data['username'],          // NOT encrypted
             'email'                   => $this->encryption->encryptField($data['email']),
@@ -95,7 +94,6 @@ class UserService
         ]);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $createdByUserId,
             'action'       => 'USER_CREATED',
             'severity'     => 'info',
@@ -145,7 +143,6 @@ class UserService
         ]);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $updatedByUserId,
             'action'       => 'USER_UPDATED',
             'severity'     => 'info',
@@ -184,7 +181,6 @@ class UserService
         $this->userModel->updatePassword($userId, $tenantId, $hash);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $userId,
             'action'       => 'PASSWORD_CHANGED',
             'severity'     => 'info',
@@ -211,7 +207,6 @@ class UserService
         $this->userModel->setMustChangePassword($targetUserId, $tenantId, true);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $adminUserId,
             'action'       => 'ADMIN_RESET_PASSWORD',
             'severity'     => 'warning',
@@ -236,7 +231,6 @@ class UserService
         $this->userModel->softDelete($id, $tenantId);
 
         $this->auditLog->log([
-            'tenant_id'    => $tenantId,
             'user_id'      => $deletedByUserId,
             'action'       => 'USER_DELETED',
             'severity'     => 'warning',

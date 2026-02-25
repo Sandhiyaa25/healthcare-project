@@ -11,7 +11,7 @@ class Tenant
 
     public function __construct()
     {
-        $this->db = Database::getInstance();
+        $this->db = Database::getMaster();
     }
 
     public function findById(int $id): ?array
@@ -36,14 +36,16 @@ class Tenant
     }
 
     public function create(array $data): int
+
     {
         $stmt = $this->db->prepare('
-            INSERT INTO tenants (name, subdomain, contact_email, contact_phone, subscription_plan, status, max_users)
-            VALUES (:name, :subdomain, :contact_email, :contact_phone, :subscription_plan, :status, :max_users)
+            INSERT INTO tenants (name, subdomain, db_name, contact_email, contact_phone, subscription_plan, status, max_users)
+            VALUES (:name, :subdomain, :db_name, :contact_email, :contact_phone, :subscription_plan, :status, :max_users)
         ');
         $stmt->execute([
             ':name'              => $data['name'],
             ':subdomain'         => $data['subdomain'],
+            ':db_name'           => $data['db_name'],
             ':contact_email'     => $data['contact_email'] ?? null,
             ':contact_phone'     => $data['contact_phone'] ?? null,
             ':subscription_plan' => $data['subscription_plan'] ?? 'trial',
@@ -98,10 +100,19 @@ class Tenant
         return $stmt->fetchAll();
     }
 
+    /**
+     * Count active users for a tenant by connecting to their isolated DB.
+     */
     public function countUsers(int $tenantId): int
     {
-        $stmt = $this->db->prepare("SELECT COUNT(*) FROM users WHERE tenant_id = ? AND status != 'deleted'");
-        $stmt->execute([$tenantId]);
+        $tenant = $this->findById($tenantId);
+        if (!$tenant || empty($tenant['db_name'])) {
+            return 0;
+        }
+
+        $tenantDb = Database::getTenant($tenant['db_name']);
+        $stmt     = $tenantDb->prepare("SELECT COUNT(*) FROM users WHERE status != 'deleted'");
+        $stmt->execute();
         return (int) $stmt->fetchColumn();
     }
 }

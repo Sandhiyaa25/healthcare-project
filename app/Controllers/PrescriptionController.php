@@ -57,12 +57,55 @@ class PrescriptionController
         Response::created($rx, 'Prescription created');
     }
 
+    /**
+     * PUT /api/prescriptions/{id}
+     * Roles: doctor only — update their own pending prescription.
+     */
+    public function update(Request $request): void
+    {
+        $tenantId = (int) $request->getAttribute('auth_tenant_id');
+        $doctorId = (int) $request->getAttribute('auth_user_id');
+        $rxId     = (int) $request->param('id');
+        $role     = $request->getAttribute('auth_role');
+
+        if ($role !== 'doctor') {
+            Response::forbidden('Only the prescribing doctor can update a prescription', 'FORBIDDEN');
+        }
+
+        $rx = $this->prescriptionService->update($rxId, $request->all(), $tenantId, $doctorId, $request->ip(), $request->userAgent());
+        Response::success($rx, 'Prescription updated');
+    }
+
+    /**
+     * DELETE /api/prescriptions/{id}
+     * Roles: admin only — delete a pending prescription.
+     */
+    public function destroy(Request $request): void
+    {
+        $tenantId = (int) $request->getAttribute('auth_tenant_id');
+        $adminId  = (int) $request->getAttribute('auth_user_id');
+        $rxId     = (int) $request->param('id');
+        $role     = $request->getAttribute('auth_role');
+
+        if ($role !== 'admin') {
+            Response::forbidden('Only admin can delete prescriptions', 'FORBIDDEN');
+        }
+
+        $this->prescriptionService->delete($rxId, $tenantId, $adminId, $request->ip(), $request->userAgent());
+        Response::success(null, 'Prescription deleted successfully');
+    }
+
     public function verify(Request $request): void
     {
         $tenantId      = (int) $request->getAttribute('auth_tenant_id');
         $pharmacistId  = (int) $request->getAttribute('auth_user_id');
         $rxId          = (int) $request->param('id');
+        $role          = $request->getAttribute('auth_role');
         $status        = $request->input('status');
+
+        if ($role !== 'pharmacist') {
+            Response::forbidden('Only a pharmacist can verify prescriptions', 'FORBIDDEN');
+        }
 
         $rx = $this->prescriptionService->verifyByPharmacist($rxId, $status, $tenantId, $pharmacistId, $request->ip(), $request->userAgent());
         Response::success($rx, 'Prescription status updated');

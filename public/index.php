@@ -98,8 +98,8 @@ $router->post('/api/auth/refresh', [\App\Controllers\AuthController::class, 'ref
 // ─── PROTECTED ROUTES ─────────────────────────────────────────────────────────
 
 // Common protected middleware stack
-$protected = [MW_CORS, MW_RATE, MW_JSON, MW_SANITIZE, MW_AUTH, MW_CSRF, MW_TENANT];
-$protectedGet = [MW_CORS, MW_RATE, MW_AUTH, MW_CSRF, MW_TENANT];
+$protected = [MW_CORS, MW_RATE, MW_JSON, MW_SANITIZE, MW_AUTH, MW_TENANT, MW_CSRF];
+$protectedGet = [MW_CORS, MW_RATE, MW_AUTH, MW_TENANT, MW_CSRF];
 
 // ── Auth ──
 $router->post('/api/auth/logout',           [\App\Controllers\AuthController::class, 'logout'],         [MW_CORS, MW_RATE, MW_AUTH, MW_TENANT]);
@@ -107,10 +107,11 @@ $router->post('/api/auth/csrf/regenerate',  [\App\Controllers\AuthController::cl
 
 // ── Users (Admin only) ──
 $router->get('/api/users',                    [\App\Controllers\UserController::class, 'index'],              $protectedGet);
+$router->get('/api/users/me',                 [\App\Controllers\UserController::class, 'me'],                 $protectedGet); // Gap 1 — must be before /{id}
 $router->get('/api/users/{id}',              [\App\Controllers\UserController::class, 'show'],               $protectedGet);
 $router->post('/api/users',                  [\App\Controllers\UserController::class, 'store'],              $protected);
 $router->put('/api/users/{id}',              [\App\Controllers\UserController::class, 'update'],             $protected);
-$router->delete('/api/users/{id}',           [\App\Controllers\UserController::class, 'destroy'],            [MW_CORS, MW_RATE, MW_AUTH, MW_CSRF, MW_TENANT]);
+$router->delete('/api/users/{id}',           [\App\Controllers\UserController::class, 'destroy'],            [MW_CORS, MW_RATE, MW_AUTH, MW_TENANT, MW_CSRF]);
 $router->put('/api/users/me/password',       [\App\Controllers\UserController::class, 'changeMyPassword'],   $protected);
 $router->put('/api/users/{id}/reset-password', [\App\Controllers\UserController::class, 'adminResetPassword'], $protected);
 
@@ -123,7 +124,7 @@ $router->get('/api/patients',           [\App\Controllers\PatientController::cla
 $router->get('/api/patients/{id}',      [\App\Controllers\PatientController::class, 'show'],    $protectedGet);
 $router->post('/api/patients',          [\App\Controllers\PatientController::class, 'store'],   $protected);
 $router->put('/api/patients/{id}',      [\App\Controllers\PatientController::class, 'update'],  $protected);
-$router->delete('/api/patients/{id}',   [\App\Controllers\PatientController::class, 'destroy'], [MW_CORS, MW_RATE, MW_AUTH, MW_CSRF, MW_TENANT]);
+$router->delete('/api/patients/{id}',   [\App\Controllers\PatientController::class, 'destroy'], [MW_CORS, MW_RATE, MW_AUTH, MW_TENANT, MW_CSRF]);
 
 // ── Appointments ──
 // Note: /upcoming and /me-style routes MUST be declared BEFORE /{id} routes
@@ -134,18 +135,22 @@ $router->post('/api/appointments',               [\App\Controllers\AppointmentCo
 $router->put('/api/appointments/{id}',           [\App\Controllers\AppointmentController::class, 'update'],       $protected);
 $router->patch('/api/appointments/{id}/cancel',  [\App\Controllers\AppointmentController::class, 'cancel'],       $protected);
 $router->patch('/api/appointments/{id}/status',  [\App\Controllers\AppointmentController::class, 'updateStatus'], $protected);
+$router->delete('/api/appointments/{id}',        [\App\Controllers\AppointmentController::class, 'destroy'],      [MW_CORS, MW_RATE, MW_AUTH, MW_TENANT, MW_CSRF]); // Gap 2
 
 // ── Prescriptions ──
 $router->get('/api/prescriptions',          [\App\Controllers\PrescriptionController::class, 'index'],  $protectedGet);
 $router->get('/api/prescriptions/{id}',     [\App\Controllers\PrescriptionController::class, 'show'],   $protectedGet);
-$router->post('/api/prescriptions',         [\App\Controllers\PrescriptionController::class, 'store'],  $protected);
-$router->patch('/api/prescriptions/{id}/verify', [\App\Controllers\PrescriptionController::class, 'verify'], $protected);
+$router->post('/api/prescriptions',              [\App\Controllers\PrescriptionController::class, 'store'],   $protected);
+$router->put('/api/prescriptions/{id}',          [\App\Controllers\PrescriptionController::class, 'update'],  $protected);                                          // Gap 3
+$router->delete('/api/prescriptions/{id}',       [\App\Controllers\PrescriptionController::class, 'destroy'], [MW_CORS, MW_RATE, MW_AUTH, MW_TENANT, MW_CSRF]);      // Gap 4
+$router->patch('/api/prescriptions/{id}/verify', [\App\Controllers\PrescriptionController::class, 'verify'],  $protected);
 
 // ── Dashboard ──
 $router->get('/api/dashboard',            [\App\Controllers\DashboardController::class, 'index'],     $protectedGet);
 $router->get('/api/dashboard/analytics',  [\App\Controllers\DashboardController::class, 'analytics'], $protectedGet);
 
 // ── Messages (Communication) ──
+$router->get('/api/messages',                   [\App\Controllers\MessageController::class, 'inbox'],             $protectedGet);                                    // Gap 7 — must be before /{appointment_id}
 $router->get('/api/messages/{appointment_id}',  [\App\Controllers\MessageController::class, 'getByAppointment'], $protectedGet);
 $router->post('/api/messages',                  [\App\Controllers\MessageController::class, 'store'],            $protected);
 
@@ -158,21 +163,31 @@ $router->post('/api/billing/{id}/payment',[\App\Controllers\BillingController::c
 
 // ── Staff ──
 $router->get('/api/staff',        [\App\Controllers\StaffController::class, 'index'],   $protectedGet);
+$router->get('/api/staff/me',     [\App\Controllers\StaffController::class, 'me'],      $protectedGet); // Gap 6 — must be before /{id}
 $router->get('/api/staff/{id}',   [\App\Controllers\StaffController::class, 'show'],    $protectedGet);
 $router->post('/api/staff',       [\App\Controllers\StaffController::class, 'store'],   $protected);
 $router->put('/api/staff/{id}',   [\App\Controllers\StaffController::class, 'update'],  $protected);
-$router->delete('/api/staff/{id}',[\App\Controllers\StaffController::class, 'destroy'], [MW_CORS, MW_RATE, MW_AUTH, MW_CSRF, MW_TENANT]);
+$router->delete('/api/staff/{id}',[\App\Controllers\StaffController::class, 'destroy'], [MW_CORS, MW_RATE, MW_AUTH, MW_TENANT, MW_CSRF]);
 
 // ── Calendar ──
-$router->get('/api/calendar',             [\App\Controllers\CalendarController::class, 'index'],  $protectedGet);
-$router->get('/api/calendar/{date}',      [\App\Controllers\CalendarController::class, 'byDate'], $protectedGet);
+// NOTE: static prefix (event/{id}) must be declared BEFORE the {date} wildcard
+// so that /api/calendar/event/5 doesn't match {date}='event' first.
+$router->get('/api/calendar',             [\App\Controllers\CalendarController::class, 'index'],       $protectedGet);
 $router->get('/api/calendar/event/{id}',  [\App\Controllers\CalendarController::class, 'eventDetail'], $protectedGet);
+$router->get('/api/calendar/{date}',      [\App\Controllers\CalendarController::class, 'byDate'],      $protectedGet);
 
 // ── Medical Records ──
 $router->get('/api/records/patient/{patient_id}', [\App\Controllers\RecordController::class, 'getByPatient'], $protectedGet);
 $router->get('/api/records/{id}',                 [\App\Controllers\RecordController::class, 'show'],         $protectedGet);
 $router->post('/api/records',                     [\App\Controllers\RecordController::class, 'store'],        $protected);
 $router->put('/api/records/{id}',                 [\App\Controllers\RecordController::class, 'update'],       $protected);
+$router->patch('/api/records/{id}/archive',       [\App\Controllers\RecordController::class, 'archive'],      $protected); // Gap 5
+
+// ── AI (Gemini 2.5 Flash) ──
+$router->post('/api/ai/patient-summary/{patient_id}', [\App\Controllers\AiController::class, 'patientSummary'],     $protected);
+$router->post('/api/ai/prescription-suggest',          [\App\Controllers\AiController::class, 'prescriptionSuggest'], $protected);
+$router->post('/api/ai/symptom-analyze',               [\App\Controllers\AiController::class, 'symptomAnalyze'],      $protected);
+$router->post('/api/ai/explain-diagnosis',             [\App\Controllers\AiController::class, 'explainDiagnosis'],    $protected);
 
 // ── Settings & Audit Logs ──
 $router->get('/api/settings/audit-logs',         [\App\Controllers\SettingsController::class, 'auditLogs'],      $protectedGet);
@@ -194,7 +209,8 @@ $router->get('/api/platform/tenants',                        [\App\Controllers\T
 $router->get('/api/platform/tenants/{id}',                   [\App\Controllers\TenantController::class, 'show'],       $platformProtectedGet);
 $router->patch('/api/platform/tenants/{id}/approve',         [\App\Controllers\TenantController::class, 'approve'],    $platformProtected);
 $router->patch('/api/platform/tenants/{id}/suspend',         [\App\Controllers\TenantController::class, 'suspend'],    $platformProtected);
-$router->patch('/api/platform/tenants/{id}/reactivate',      [\App\Controllers\TenantController::class, 'reactivate'], $platformProtected);
+$router->patch('/api/platform/tenants/{id}/reactivate',           [\App\Controllers\TenantController::class, 'reactivate'],        $platformProtected);
+$router->post('/api/platform/tenants/{id}/reset-admin-password',  [\App\Controllers\TenantController::class, 'resetAdminPassword'], $platformProtected); // Gap 8
 
 // Tenant roles (used by tenant users, uses regular auth)
 $router->get('/api/tenants/roles', [\App\Controllers\TenantController::class, 'getRoles'], $protectedGet);
